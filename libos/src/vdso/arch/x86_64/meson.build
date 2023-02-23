@@ -1,3 +1,13 @@
+c_vdso_args = [
+    '-fno-stack-protector',
+    '-fPIC',
+    '-ffreestanding',
+]
+
+#if vm
+#    c_vdso_args += ['-DVDSO_USE_SYSCALL_INSTR']
+#endif
+
 vdso_so_dbg = shared_library('vdso',
     'vdso.c',
     'vdso_note.S',
@@ -9,11 +19,7 @@ vdso_so_dbg = shared_library('vdso',
     # TODO this should only include libos_entry_api.h and files defining necessary types
     include_directories: includes_libos,
 
-    c_args: [
-        '-fno-stack-protector',
-        '-fPIC',
-        '-ffreestanding',
-    ],
+    c_args: c_vdso_args,
     link_args: [
         '-nostdlib',
         '-Wl,-T@0@'.format(meson.current_source_dir() / 'vdso.lds'),
