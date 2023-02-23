@@ -4,6 +4,10 @@ cflags_libos = [
     # this
     '-ffreestanding',
 
+    # instruct GCC not to use the AMD64 ABI 128-byte redzone which resides below the stack pointer,
+    # or kernel will be interrupt unsafe (https://wiki.osdev.org/Creating_a_64-bit_kernel)
+    '-mno-red-zone',
+
     '-DIN_LIBOS',
 ]
 
