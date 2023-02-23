@@ -4,9 +4,9 @@ c_vdso_args = [
     '-ffreestanding',
 ]
 
-#if vm
-#    c_vdso_args += ['-DVDSO_USE_SYSCALL_INSTR']
-#endif
+if vm
+    c_vdso_args += ['-DVDSO_USE_SYSCALL_INSTR']
+endif
 
 vdso_so_dbg = shared_library('vdso',
     'vdso.c',

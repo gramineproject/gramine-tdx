@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright (C) 2023 Intel Corporation */
+
+#include "pal.h"
+#include "pal_common.h"
+#include "pal_internal.h"
+
+int _PalStreamsWaitEvents(size_t count, PAL_HANDLE* handle_array, pal_wait_flags_t* events,
+                                  pal_wait_flags_t* ret_events, uint64_t* timeout_us) {
+    return pal_common_streams_wait_events(count, handle_array, events, ret_events, timeout_us);
+}

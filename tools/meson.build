@@ -56,6 +56,22 @@ if sgx
     )
 endif
 
+if vm
+    hostpalpath_vm = join_paths(get_option('prefix'), pkglibdir, 'vm')
+    conf_gramine_vm = configuration_data()
+    conf_gramine_vm.merge_from(conf)
+    conf_gramine_vm.set_quoted('HOST_PAL_PATH', hostpalpath_vm)
+    conf_gramine_vm.set_quoted('BIOS_PATH', join_paths(hostpalpath_vm, 'bios'))
+    conf_gramine_vm.set_quoted('LIBPAL_PATH', join_paths(hostpalpath_vm, 'pal'))
+
+    configure_file(
+        input: 'gramine-vm.in',
+        output: 'gramine-vm',
+        configuration: conf_gramine_vm,
+        install_dir: get_option('bindir'),
+    )
+endif
+
 executable('gramine-argv-serializer',
     'argv_serializer.c',
     install: true)
