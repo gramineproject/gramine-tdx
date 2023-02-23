@@ -29,6 +29,7 @@ endif
 
 direct = get_option('direct') == 'enabled'
 sgx = get_option('sgx') == 'enabled'
+vm = get_option('vm') == 'enabled'
 skeleton = get_option('skeleton') == 'enabled'
 
 dcap = get_option('dcap') == 'enabled'
@@ -147,6 +148,10 @@ if sgx
     endif
 
     conf_sgx.set('CONFIG_SGX_DRIVER_INCLUDE', sgx_driver_include)
+endif
+
+if vm and host_machine.cpu_family() != 'x86_64'
+    error('VM PAL is currently available only for x86-64 arch')
 endif
 
 gen_symbol_map_cmd = [
