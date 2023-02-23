@@ -41,6 +41,7 @@ endif
 
 direct = get_option('direct') == 'enabled'
 sgx = get_option('sgx') == 'enabled'
+vm = get_option('vm') == 'enabled'
 skeleton = get_option('skeleton') == 'enabled'
 
 ubsan = get_option('ubsan') == 'enabled'
@@ -110,6 +111,10 @@ if sgx
         add_project_arguments('-DSGX_VTUNE_PROFILE', language: 'c')
         vtune_sdk_path = get_option('vtune_sdk_path')
     endif
+endif
+
+if vm and host_machine.cpu_family() != 'x86_64'
+    error('VM PAL is currently available only for x86-64 arch')
 endif
 
 gen_symbol_map_cmd = [
