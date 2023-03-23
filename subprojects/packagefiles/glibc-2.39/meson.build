@@ -55,9 +55,15 @@ if get_option('buildtype') == 'debug' or get_option('buildtype') == 'debugoptimi
     extra_cflags += '-g'
 endif
 
+if get_option('vm') == 'enabled' or get_option('tdx') == 'enabled'
+    compile_prog = find_program('compile-no-patches.sh')
+else
+    compile_prog = find_program('compile.sh')
+endif
+
 glibc = custom_target('glibc',
     command: [
-        find_program('compile.sh'),
+        compile_prog,
         host_machine.cpu_family(),
         '@CURRENT_SOURCE_DIR@',
         '@CURRENT_SOURCE_DIR@/glibc-2.39',
