@@ -372,6 +372,28 @@ static int init_sgx_attestation(struct pseudo_node* attestation, struct pseudo_n
     return 0;
 }
 
+static int init_tdx_attestation(struct pseudo_node* attestation) {
+    if (strcmp(g_pal_public_state->host_type, "TDX"))
+        return 0;
+
+    if (!g_pal_public_state->attestation_type) {
+        log_error("Cannot determine remote attestation type during init of /dev/attestation/");
+        return -EINVAL;
+    }
+
+    pseudo_add_str(attestation, "attestation_type", attestation_type_load);
+    pseudo_add_str(attestation, "report", &report_load);
+    pseudo_add_str(attestation, "quote", &quote_load);
+
+    struct pseudo_node* user_report_data = pseudo_add_str(attestation, "user_report_data", NULL);
+    user_report_data->perm = PSEUDO_PERM_FILE_RW;
+    user_report_data->str.save = &user_report_data_save;
+
+    log_debug("host is TDX and remote attestation type is '%s'",
+              g_pal_public_state->attestation_type);
+    return 0;
+}
+
 int init_attestation(struct pseudo_node* dev) {
     struct pseudo_node* attestation = pseudo_add_dir(dev, "attestation");
 
@@ -382,5 +404,13 @@ int init_attestation(struct pseudo_node* dev) {
     key->perm = PSEUDO_PERM_FILE_RW;
     key->str.save = &key_save;
 
-    return init_sgx_attestation(attestation, keys);
+    int ret = init_sgx_attestation(attestation, keys);
+    if (ret < 0)
+        return ret;
+
+    ret = init_tdx_attestation(attestation);
+    if (ret < 0)
+        return ret;
+
+    return 0;
 }

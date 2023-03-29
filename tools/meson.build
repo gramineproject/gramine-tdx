@@ -72,6 +72,20 @@ if vm
     )
 endif
 
+if tdx
+    hostpalpath_tdx = join_paths(get_option('prefix'), pkglibdir, 'tdx')
+    conf_gramine_tdx = configuration_data()
+    conf_gramine_tdx.merge_from(conf)
+    conf_gramine_tdx.set_quoted('TDSHIM_PAL_PATH', join_paths(hostpalpath_tdx, 'tdshim-pal'))
+
+    configure_file(
+        input: 'gramine-tdx.in',
+        output: 'gramine-tdx',
+        configuration: conf_gramine_tdx,
+        install_dir: get_option('bindir'),
+    )
+endif
+
 executable('gramine-argv-serializer',
     'argv_serializer.c',
     install: true)
