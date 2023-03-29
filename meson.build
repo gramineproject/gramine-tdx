@@ -30,6 +30,7 @@ endif
 direct = get_option('direct') == 'enabled'
 sgx = get_option('sgx') == 'enabled'
 vm = get_option('vm') == 'enabled'
+tdx = get_option('tdx') == 'enabled'
 skeleton = get_option('skeleton') == 'enabled'
 
 dcap = get_option('dcap') == 'enabled'

@@ -5,6 +5,8 @@ option('sgx', type: 'combo', choices: ['disabled', 'enabled'],
     description: 'Build and install gramine-sgx (aka Linux-SGX)')
 option('vm', type: 'combo', choices: ['disabled', 'enabled'],
       description: 'Build Virtual Machine (VM, currently only x86-64) PAL')
+option('tdx', type: 'combo', choices: ['disabled', 'enabled'],
+      description: 'Build Trusted Domain Extensions (aka TDX) PAL')
 option('skeleton', type: 'combo', choices: ['disabled', 'enabled'],
     description: 'Build skeleton PAL')
 

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: LGPL-3.0-or-later
+# Copyright (C) 2023 Intel Corporation
+
+# This file is based on `gramine.in` and modified for TDX Virtual Machine
+# environment and QEMU hypervisor.
+
+TDSHIM_PAL_PATH=@TDSHIM_PAL_PATH@
+
+APPLICATION=
+QEMU_GDB=
+ENVS=()
+PREFIX=()
+
+if [ "$GDB" == "1" ]; then
+    QEMU_GDB="-gdb tcp::9000 -S"
+fi
+
+while [ "$1" != "" ];
+do
+    if [ "$APPLICATION" == "" ]; then
+        APPLICATION=$1
+        shift
+        continue
+    fi
+
+    break
+done
+
+if [ "$APPLICATION" == "" ]; then
+    echo "Usage: $0 [<application>] <args>..."
+    exit 2
+fi
+
+QEMU_PATH="qemu"
+QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc -m 8G -smp 1"
+QEMU_OPTS="-enable-kvm -vga none -nographic -no-reboot -monitor chardev:mux -no-hpet \
+    -object memory-backend-file,id=mem,size=8G,mem-path=/dev/shm,share=on \
+    -numa node,memdev=mem"
+
+QEMU_MACHINE="-M q35,kernel_irqchip=split,confidential-guest-support=tdx \
+    -object tdx-guest,id=tdx,quote-generation-service=vsock:2:4050"
+QEMU_VIRTIO_CONSOLE="-device virtio-serial,iommu_platform=off,romfile= \
+                     -chardev stdio,id=mux,mux=on \
+                     -device virtconsole,chardev=mux -serial chardev:mux"
+QEMU_VIRTIO_FS="-chardev socket,path=/tmp/vhostfs,id=vhostfs \
+                -device vhost-user-fs-pci,iommu_platform=off,queue-size=1024,chardev=vhostfs,tag=graminefs"
+QEMU_VIRTIO_VSOCK="-device vhost-vsock-pci,iommu_platform=off,guest-cid=10,id=vsockdev"
+
+GRAMINE_ARGS="-gramine init \"$APPLICATION\" $@ -gramine-end"
+
+CMD=("${ENVS[@]}")
+CMD+=("${PREFIX[@]}")
+CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
+        $QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK \
+        -bios "$TDSHIM_PAL_PATH" \
+        -fw_cfg name=opt/gramine/pwd,string="$PWD" \
+        -fw_cfg name=opt/gramine/cmdline,string="$GRAMINE_ARGS")
+
+virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error --sandbox none &
+exec env "${CMD[@]}"
