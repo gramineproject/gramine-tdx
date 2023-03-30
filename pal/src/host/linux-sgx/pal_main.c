@@ -606,7 +606,7 @@ noreturn void pal_linux_main(void* uptr_libpal_uri, size_t libpal_uri_len, void*
     int ret;
 
     /* Relocate PAL */
-    ret = setup_pal_binary();
+    ret = setup_pal_binary(/*apply_relocations=*/true);
     if (ret < 0) {
         /* PAL relocation failed, so we can't use functions which use PAL .rodata (like
          * pal_strerror or unix_strerror) to report an error because these functions will return

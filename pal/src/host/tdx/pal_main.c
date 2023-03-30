@@ -327,7 +327,7 @@ noreturn int pal_start_continue(void* cmdline_) {
 
     /* relocate PAL */
     set_pal_binary_name("pal");
-    ret = setup_pal_binary();  // FIXME: /*apply_relocations=*/false
+    ret = setup_pal_binary(/*apply_relocations=*/false);
     if (ret < 0)
         INIT_FAIL("Relocation of the PAL binary failed");
 
