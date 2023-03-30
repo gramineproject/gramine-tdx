@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <endian.h>
 
 #include "api.h"
@@ -51,7 +52,7 @@ void _PalDebugMapRemove(void* addr);
 int _PalDebugDescribeLocation(uintptr_t addr, char* buf, size_t buf_size);
 
 /* loading ELF binaries */
-int setup_pal_binary(void);
+int setup_pal_binary(bool apply_relocations);
 void set_pal_binary_name(const char* name);
 int load_entrypoint(const char* uri);
 int find_string_and_symbol_tables(elf_addr_t ehdr_addr, elf_addr_t base_addr,
