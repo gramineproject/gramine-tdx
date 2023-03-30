@@ -706,7 +706,7 @@ out:
 }
 
 /* PAL binary must be DYN (shared object file) or EXEC (non-PIE executable) */
-int setup_pal_binary(void) {
+int setup_pal_binary(bool apply_relocations) {
     int ret;
 
     g_pal_map.l_prev = NULL;
@@ -760,8 +760,13 @@ int setup_pal_binary(void) {
     }
     g_pal_soname = g_pal_map.string_table + soname_offset;
 
-    ret = perform_relocations(&g_pal_map);
-    return ret;
+    if (apply_relocations) {
+        ret = perform_relocations(&g_pal_map);
+        if (ret < 0)
+            return ret;
+    }
+
+    return 0;
 }
 
 void set_pal_binary_name(const char* name) {
