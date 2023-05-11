@@ -43,7 +43,7 @@ struct isr_regs {
 struct idt_gate {
     uint16_t isr_addr_low;  /* linear address of Interrupt Service Routine, bits 0-15 */
     uint16_t code_selector; /* set by *.S */
-    uint8_t  ist_offset;    /* Interrupt Stack Table offset (unused, always zero) */
+    uint8_t  ist_offset;    /* Interrupt Stack Table offset (always 1 meaning IST1), set by *.S */
     uint8_t  flags;         /* set by *.S to 10001110b */
     uint16_t isr_addr_mid;  /* linear address of Interrupt Service Routine, bits 16-31 */
     uint32_t isr_addr_high; /* linear address of Interrupt Service Routine, bits 32-63 */
@@ -59,11 +59,11 @@ struct idt_ptr {
 /* 64-bit-mode Task State Segment (currently set in *.S and unused in C) */
 struct tss_64bitmode {
     uint32_t _reserved0;
-    uint64_t rsp0;
+    uint64_t rsp0_unused;
     uint64_t rsp1_unused;
     uint64_t rsp2_unused;
     uint64_t _reserved1;
-    uint64_t ist1_unused;
+    uint64_t ist1;
     uint64_t ist2_unused;
     uint64_t ist3_unused;
     uint64_t ist4_unused;

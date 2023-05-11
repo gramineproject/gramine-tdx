@@ -53,6 +53,5 @@ DEFINE_LISTP(pal_handle);
 /* Set if an error was seen on this handle. Currently only set by `_PalStreamsWaitEvents`. */
 #define PAL_HANDLE_FD_ERROR     4
 
-
 noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, void* unused,
                           void* param);
