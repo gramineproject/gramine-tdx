@@ -12,7 +12,7 @@ const struct generated_offset generated_offsets[] = {
     DEFINE(MSR_IA32_GS_BASE, MSR_IA32_GS_BASE),
 
     /* struct pal_tcb_vm */
-    OFFSET(PAL_TCB_LIBOS_SYSCALLDB, pal_tcb_vm, common.libos_tcb),
+    OFFSET(PAL_TCB_LIBOS, pal_tcb_vm, common.libos_tcb),
     OFFSET(PAL_TCB_VM_USER_RIP, pal_tcb_vm, kernel_thread.context.user_rip),
 
     OFFSET(PAL_TCB_VM_CONTEXT_R8, pal_tcb_vm, kernel_thread.context.r8),

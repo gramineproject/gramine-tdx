@@ -21,19 +21,20 @@
 // ------------------------------------- Task State Segment (TSS) ----------------------------------
 //
 // Barebones 64-bit-mode TSS: the only TSS used in our kernel so that the CPU can set up a known
-// kernel stack pointer (RSP0) when jumping from user mode (ring 3) to kernel mode (ring 0) during a
-// hardware interrupt. This TSS is pointed to be the TSS descriptor in the GDT (last descriptor,
-// loaded via ltr instruction in 64-bit mode). We don't use RSP1 and RSP2 TSS fields because we don't
-// use rings 2-3. We also don't use IST1..IST7 fields because we don't use Interrupt Stack Table.
+// kernel stack pointer (IST1) when jumping from normal context (both in ring 3 and ring 0) to
+// hardware-interrupt handling context (in ring 0). This TSS is pointed to be the TSS descriptor in
+// the GDT (last descriptor, loaded via ltr instruction in 64-bit mode). We use IST1 entry in the
+// Interrupt Stack Table to unconditionally switch to the interrupt handling stack on *all*
+// interrupts; see also idt_start struct below.
 tss_64bitmode:
     .rept   1                           // currently only one CPU core supported
 
     .long   0                           // reserved space
-    .quad   _sys_interrupt_stack        // RSP0, kernel stack pointer (for interrupt handling)
-    .quad   0                           // RSP1, unused
-    .quad   0                           // RSP2, unused
+    .quad   0                           // RSP0, unused because all interrupts use IST1
+    .quad   0                           // RSP1, unused because we don't use ring 1
+    .quad   0                           // RSP2, unused because we don't use ring 2
     .quad   0                           // reserved space
-    .quad   0                           // IST1, interrupt stack pointer 1, unused
+    .quad   _sys_interrupt_stack        // IST1, interrupt stack pointer 1, used for all interrupts
     .quad   0                           // IST2, interrupt stack pointer 2, unused
     .quad   0                           // IST3, interrupt stack pointer 3, unused
     .quad   0                           // IST4, interrupt stack pointer 4, unused
@@ -51,7 +52,7 @@ idt_start:
     .rept   256
     .word   0                                   // VA[15..0] of ISR
     .word   gdt_entry_kernel_cs - gdt_start     // code segment selector
-    .byte   0                                   // Interrupt Task Table offset
+    .byte   1                                   // Interrupt Stack Table offset (always use IST1)
     .byte   0b10001110                          // attributes (P=1, DPL=0, RSV=0, type=1110)
     .word   0                                   // VA[31..16] of ISR
     .long   0                                   // VA[64..32] of ISR

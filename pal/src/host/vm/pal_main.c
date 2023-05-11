@@ -105,6 +105,40 @@ static int add_preloaded_range(uintptr_t addr, size_t size, const char* comment)
     return pal_add_initial_range(addr, size, /*pal_prot=*/0, comment);
 }
 
+static void zero_out_memory(void) {
+    extern struct pal_initial_mem_range g_initial_mem_ranges[];
+
+    uint64_t cur_mem_range_idx = 0;
+    uintptr_t addr = (uintptr_t)g_pal_public_state.memory_address_end;
+    while (true) {
+        if (!addr)
+            return;
+        addr -= 4096;
+
+        while (cur_mem_range_idx < g_pal_public_state.initial_mem_ranges_len
+                && addr < g_initial_mem_ranges[cur_mem_range_idx].start) {
+            /* skip too-high mem ranges; we rely on mem ranges to be sorted in desc order */
+            cur_mem_range_idx++;
+        }
+
+        while (cur_mem_range_idx < g_pal_public_state.initial_mem_ranges_len
+                && addr >= g_initial_mem_ranges[cur_mem_range_idx].start
+                && addr <  g_initial_mem_ranges[cur_mem_range_idx].end) {
+            /* jump over a mem range; we rely on mem ranges to be sorted in desc order */
+            addr = g_initial_mem_ranges[cur_mem_range_idx].start;
+            if (!addr)
+                return;
+            addr -= 4096;
+            cur_mem_range_idx++;
+        }
+
+        if (addr < (uintptr_t)g_pal_public_state.memory_address_start)
+            return;
+
+        memset((void*)addr, 0, 4096);
+    }
+}
+
 noreturn static void print_usage_and_exit(void) {
     log_always("USAGE: init <application> args...");
     log_always("This is an internal interface. Use gramine-vm to launch applications.");
@@ -151,6 +185,10 @@ noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, vo
     ret = add_preloaded_range(0x180000UL, 0x280000UL, "pal_binary");
     if (ret < 0)
         INIT_FAIL("Failed to preload PAL-binary memory range");
+
+    /* Common memory-allocation logic relies on all memory pages to be zeroed out after boot.
+     * This is not true for common hypervisors like QEMU/KVM, so must do it ourselves. */
+    zero_out_memory();
 
     init_slab_mgr();
 

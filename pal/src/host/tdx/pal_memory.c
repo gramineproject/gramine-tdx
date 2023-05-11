@@ -6,41 +6,24 @@
  */
 
 #include "api.h"
+#include "kernel_memory.h"
 #include "pal.h"
 #include "pal_error.h"
 #include "pal_internal.h"
-
-#include "kernel_memory.h"
 
 int _PalVirtualMemoryAlloc(void* addr, size_t size, pal_prot_flags_t prot) {
     assert(WITHIN_MASK(prot, PAL_PROT_MASK));
     assert(addr);
 
-    /* FIXME: currently all PTEs are always RWX and present; we may want to modify PTEs here */
+    /* FIXME: currently all PTEs are always RWX; we may want to modify PTEs here */
     __UNUSED(prot);
 
-    if ((uintptr_t)addr < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
-            SHARED_MEM_ADDR < (uintptr_t)addr + size) {
-        /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
-        return -PAL_ERROR_DENIED;
-    }
-
-    memset(addr, 0, size);
-    return 0;
+    return memory_alloc(addr, size);
 }
 
 int _PalVirtualMemoryFree(void* addr, size_t size) {
     assert(addr);
-
-    /* FIXME: currently all PTEs are always present; we may want to modify PTEs here */
-
-    if ((uintptr_t)addr < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
-            SHARED_MEM_ADDR < (uintptr_t)addr + size) {
-        /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
-        return -PAL_ERROR_DENIED;
-    }
-
-    return 0;
+    return memory_free(addr, size);
 }
 
 int _PalVirtualMemoryProtect(void* addr, size_t size, pal_prot_flags_t prot) {
