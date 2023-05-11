@@ -15,6 +15,10 @@
 /* Beginning of the page table hierarchy */
 static uint64_t g_pml4_table_base;
 
+/* Lazy memory allocation (when the page is zeroed out only on the first access to it) is enabled
+ * after interrupts are enabled (because it relies on the #PF exception handler) */
+bool g_enable_lazy_memory_alloc = false;
+
 void* memory_get_shared_region(size_t size) {
 	/* trivial shared memory management: allocations in the shared-memory range
 	 * [SHARED_MEM_ADDR, SHARED_MEM_ADDR + SHARED_MEM_SIZE) are ever increasing */
@@ -63,11 +67,31 @@ int memory_find_page_table_entry(uint64_t addr, uint64_t** out_pte_addr) {
     size_t pt_table_idx = (addr / 1024 / 4) % 512;
 
     /* sanity check: must arrive at the same page address as in `addr` */
-    uint64_t page_addr = pt_table[pt_table_idx] & 0xfffffffe00000UL;
-    if ((addr & 0xfffffffe00000UL) != page_addr)
+    uint64_t page_addr = pt_table[pt_table_idx] & 0x000ffffffffff000UL;
+    if ((addr & 0x000ffffffffff000UL) != page_addr)
         return -PAL_ERROR_INVAL;
 
     *out_pte_addr = &pt_table[pt_table_idx];
+    return 0;
+}
+
+int memory_mark_pages_present(uint64_t addr, size_t size, bool present) {
+    uint64_t mark_addr = addr;
+    while (mark_addr < addr + size) {
+        uint64_t* pte_addr;
+        int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
+        if (ret < 0)
+            return ret;
+
+        /* set or clear bit 0 (P = Present) */
+        if (present)
+            *pte_addr |= 1UL;
+        else
+            *pte_addr &= ~1UL;
+        invlpg(mark_addr);
+
+        mark_addr += 4096;
+    }
     return 0;
 }
 
@@ -220,5 +244,31 @@ int memory_init(e820_table_entry* e820_entries, size_t e820_entries_size,
 
     *out_memory_address_start = (void*)memory_address_start;
     *out_memory_address_end   = (void*)memory_address_end;
+    return 0;
+}
+
+int memory_alloc(void* addr, size_t size) {
+    if ((uintptr_t)addr < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
+            SHARED_MEM_ADDR < (uintptr_t)addr + size) {
+        /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
+        return -PAL_ERROR_DENIED;
+    }
+
+    /* lazy page allocation: clear the present bit to induce #PF (see also kernel_interrupts.c) */
+    if (g_enable_lazy_memory_alloc) {
+        return memory_mark_pages_present((uint64_t)addr, size, /*present=*/false);
+    } else {
+        /* at boot time, when interrupts are not yet enabled, cannot use #PF so allocate now */
+        memset(addr, 0, size);
+        return 0;
+    }
+}
+
+int memory_free(void* addr, size_t size) {
+    if ((uintptr_t)addr < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
+            SHARED_MEM_ADDR < (uintptr_t)addr + size) {
+        /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
+        return -PAL_ERROR_DENIED;
+    }
     return 0;
 }

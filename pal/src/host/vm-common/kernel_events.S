@@ -133,12 +133,12 @@ jump_into_user_mode:
 syscall_asm:
     mov     %rcx, %gs:PAL_TCB_VM_USER_RIP
     lea     sysret_asm(%rip), %rcx
-    jmp     *%gs:(PAL_TCB_LIBOS_SYSCALLDB + 0x8)        // `syscalldb` addr is at offset 0x8
+    jmp     *%gs:(PAL_TCB_LIBOS + 0x8)      // `libos_syscall_entry` addr is at offset 0x8
 
 // FIXME: ideally must add swapgs right-before sysretq, but GS is not used by ring-3 anyway
 sysret_asm:
     mov     %gs:PAL_TCB_VM_USER_RIP, %rcx
-    or      $0x200, %r11                                // userland RFLAGS will contain IF
+    or      $0x200, %r11                    // userland RFLAGS will contain IF
     sysretq
 
 

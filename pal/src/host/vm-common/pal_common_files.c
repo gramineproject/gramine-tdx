@@ -19,6 +19,7 @@
 #include "stat.h"
 
 #include "kernel_files.h"
+#include "kernel_memory.h"
 #include "kernel_virtio.h"
 
 #define DIRBUF_SIZE 1024
@@ -282,6 +283,13 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
     if (!(prot & PAL_PROT_WRITECOPY) && (prot & PAL_PROT_WRITE)) {
         log_warning("App tries to create a writable shared file mapping. This is impossible.");
         return -PAL_ERROR_DENIED;
+    }
+
+    /* lazy page allocation: clear the present bit to induce #PF (see also kernel_interrupts.c) */
+    if (g_enable_lazy_memory_alloc) {
+        int ret = memory_mark_pages_present((uint64_t)addr, size, /*present=*/false);
+        if (ret < 0)
+            return ret;
     }
 
     return emulate_file_map_via_read(handle->file.nodeid, handle->file.fh, addr, offset, size);
