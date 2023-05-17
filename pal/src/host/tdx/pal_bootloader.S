@@ -43,8 +43,9 @@ pal_start:
     or      $(1 << 18) + (1 << 10) + (1 << 9), %rax
     mov     %rax, %cr4
 
-    // set XCR0 to enable AVX, SSE, X87 (RCX: which XCR reg to update, RDX: upper bits of features)
-    mov     $7, %rax
+    // set XCR0 to enable SSE and X87 (RCX: which XCR reg to update, RDX: upper bits of features);
+    // PAL will enable more features if available on VM
+    mov     $3, %rax
     mov     $0, %rcx
     mov     $0, %rdx
     xsetbv

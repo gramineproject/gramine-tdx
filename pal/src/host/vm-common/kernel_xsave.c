@@ -27,10 +27,10 @@ const uint32_t g_xsave_reset_state[VM_XSAVE_RESET_STATE_SIZE / sizeof(uint32_t)]
 };
 
 int xsave_init(void) {
+    /* OSXSAVE bit in CR4 as well as SSE/x87 bits in XCR0 were already set in bootloader */
+    uint64_t xcr0 = VM_XFEATURE_MASK_FPSSE;
+
     unsigned int words[4];
-
-    /* OSXSAVE bit in CR4 as well as AVX/SSE/x87 bits in XCR0 were already set in pal_start() */
-
     cpuid(FEATURE_FLAGS_LEAF, 0, words);
 
     if (!(words[CPUID_WORD_ECX] & CPUID_FEATURE_XSAVE) ||
@@ -45,9 +45,32 @@ int xsave_init(void) {
         return -PAL_ERROR_INVAL;
 
     if (!(xfeatures & ~VM_XFEATURE_MASK_FPSSE)) {
-        /* support only FP and SSE, can't use XSAVE (it was introduced with AVX) */
+        /* VM supports only x87 and SSE, can't use XSAVE (it was introduced with AVX) */
         return -PAL_ERROR_INVAL;
     }
+
+    /* enable AVX256 in XCR0 if available in CPUID leaf (here and below, see Intel SDM, Vol. 1,
+     * Chapter 13.3, notes on relation between CPUID and XCR0) */
+    if (xfeatures & VM_XFEATURE_MASK_YMM)
+        xcr0 |= VM_XFEATURE_MASK_YMM;
+
+    /* we never enable MPX; note that it is also always forced to 0 in Intel TDX */
+
+    /* enable AVX512; note that these 3 bits must be always set together or not set at all */
+    if ((xfeatures & VM_XFEATURE_MASK_AVX512) == VM_XFEATURE_MASK_AVX512)
+        xcr0 |= VM_XFEATURE_MASK_AVX512;
+
+    /* we never enable PKRU -- it is not used by Gramine in any way */
+
+    /* enable AMX's XTILECFG */
+    if (xfeatures & VM_XFEATURE_MASK_AMX_CFG)
+        xcr0 |= VM_XFEATURE_MASK_AMX_CFG;
+
+    /* enable AMX's XTILEDATA */
+    if (xfeatures & VM_XFEATURE_MASK_AMX_DATA)
+        xcr0 |= VM_XFEATURE_MASK_AMX_DATA;
+
+    __asm__ volatile("xsetbv" : : "a"(xcr0), "c"(0), "d"(0));
 
     g_xsave_size = xsavesize;
     return 0;
