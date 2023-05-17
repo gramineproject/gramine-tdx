@@ -33,8 +33,8 @@ _start32:
     or      $(1 << 18) + (1 << 10) + (1 << 9) + (1 << 5), %eax
     mov     %eax, %cr4                  // OSXSAVE, OSXMMEXCPT, OSFXSR, PAE
     xchg    %edx, %edi                  // %edi supposed to be init'ed to 0
-    mov     $7, %eax                    // AVX, SSE, X87
-    mov     %edx, %ecx                  // XCR0
+    mov     $3, %eax                    // SSE and X87
+    mov     %edx, %ecx                  // XCR0; PAL will enable more features if available on VM
     xsetbv
     mov     %cr0, %eax
     or      $(1 << 31), %eax            // PG
