@@ -432,8 +432,9 @@ int virtio_console_init(struct virtio_pci_regs* pci_regs, struct virtio_console_
     uint64_t rq_notify_off = vm_mmio_readw(&pci_regs->queue_notify_off);
     console->rq_notify_addr = (uint16_t*)(notify_off_addr + rq_notify_off * notify_off_multiplier);
 
+    size_t rq_notify_addr_size = sizeof(*console->rq_notify_addr);
     if (!(PCI_MMIO_START_ADDR <= (uintptr_t)console->rq_notify_addr &&
-                (uintptr_t)console->rq_notify_addr < PCI_MMIO_END_ADDR)) {
+                (uintptr_t)console->rq_notify_addr + rq_notify_addr_size < PCI_MMIO_END_ADDR)) {
         /* incorrect or malicious RQ queue notify addr */
         ret = -PAL_ERROR_DENIED;
         goto fail;
@@ -443,8 +444,9 @@ int virtio_console_init(struct virtio_pci_regs* pci_regs, struct virtio_console_
     uint64_t tq_notify_off = vm_mmio_readw(&pci_regs->queue_notify_off);
     console->tq_notify_addr = (uint16_t*)(notify_off_addr + tq_notify_off * notify_off_multiplier);
 
+    size_t tq_notify_addr_size = sizeof(*console->tq_notify_addr);
     if (!(PCI_MMIO_START_ADDR <= (uintptr_t)console->tq_notify_addr &&
-                (uintptr_t)console->tq_notify_addr < PCI_MMIO_END_ADDR)) {
+                (uintptr_t)console->tq_notify_addr + tq_notify_addr_size < PCI_MMIO_END_ADDR)) {
         /* incorrect or malicious TQ queue notify addr */
         ret = -PAL_ERROR_DENIED;
         goto fail;
