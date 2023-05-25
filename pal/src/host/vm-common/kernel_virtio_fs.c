@@ -875,8 +875,9 @@ int virtio_fs_init(struct virtio_pci_regs* pci_regs, struct virtio_fs_config* pc
     fs->requests_notify_addr = (uint16_t*)(notify_off_addr
                                                + requests_notify_off * notify_off_multiplier);
 
+    size_t notify_addr_size = sizeof(*fs->requests_notify_addr);
     if (!(PCI_MMIO_START_ADDR <= (uintptr_t)fs->requests_notify_addr &&
-                (uintptr_t)fs->requests_notify_addr < PCI_MMIO_END_ADDR)) {
+                (uintptr_t)fs->requests_notify_addr + notify_addr_size < PCI_MMIO_END_ADDR)) {
         /* incorrect or malicious queue notify addr */
         ret = -PAL_ERROR_DENIED;
         goto fail;
