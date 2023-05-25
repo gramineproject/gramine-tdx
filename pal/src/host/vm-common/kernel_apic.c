@@ -57,7 +57,8 @@ static uint32_t ioapic_read_reg(uint32_t offset) {
     vm_mmio_writel(ioapic_regsel_addr, offset);
     uint32_t val = vm_mmio_readl(ioapic_win_addr);
 
-    /* TODO: val was read from VMM, needs to be hardened */
+    /* NOTE: val was read from potentially malicious VMM, needs to be hardened when/if this function
+     *       will become used */
     return val;
 }
 
