@@ -27,6 +27,7 @@
 #define GRAMINE_ARGS_END_STR "-gramine-end"
 
 #define MAX_ARGV 128
+#define MAX_FW_CFG_FILES 512 /* QEMU fw cfg doesn't specify a limit, but let's set it for sanity */
 
 /* taken from QEMU's fw_cfg.h */
 struct FWCfgFile {          /* an individual file entry, 64 bytes total */
