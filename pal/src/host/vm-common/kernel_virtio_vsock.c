@@ -54,8 +54,9 @@ static int handle_rq(void) {
 
     uint16_t host_used_idx = vm_shared_readw(&g_vsock->rq->used->idx);
 
-    if (host_used_idx < g_vsock->rq->seen_used) {
-        /* malicious (impossible) value reported by the host */
+    if (host_used_idx - g_vsock->rq->seen_used > g_vsock->rq->queue_size) {
+        /* malicious (impossible) value reported by the host; note that this check works also in
+         * cases of int wrap */
         return -PAL_ERROR_DENIED;
     }
 
@@ -156,8 +157,9 @@ static int cleanup_tq(void) {
 
     uint16_t host_used_idx = vm_shared_readw(&g_vsock->tq->used->idx);
 
-    if (host_used_idx < g_vsock->tq->seen_used) {
-        /* malicious (impossible) value reported by the host */
+    if (host_used_idx - g_vsock->tq->seen_used > g_vsock->tq->queue_size) {
+        /* malicious (impossible) value reported by the host; note that this check works also in
+         * cases of int wrap */
         return -PAL_ERROR_DENIED;
     }
 
