@@ -37,6 +37,10 @@ int virtio_console_isr(void) {
         return 0;
 
     uint32_t interrupt_status = vm_mmio_readl(g_console->interrupt_status_reg);
+    if (!WITHIN_MASK(interrupt_status, VIRTIO_INTERRUPT_STATUS_MASK)) {
+        log_error("Panic: ISR status register has reserved bits set (0x%x)", interrupt_status);
+        triple_fault();
+    }
 
     if (interrupt_status & VIRTIO_INTERRUPT_STATUS_USED) {
         /* real work is done in the bottomhalf called in normal context, see below */

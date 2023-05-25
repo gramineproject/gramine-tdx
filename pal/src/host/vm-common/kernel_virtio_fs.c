@@ -67,6 +67,10 @@ int virtio_fs_isr(void) {
         return 0;
 
     uint32_t interrupt_status = vm_mmio_readl(g_fs->interrupt_status_reg);
+    if (!WITHIN_MASK(interrupt_status, VIRTIO_INTERRUPT_STATUS_MASK)) {
+        log_error("Panic: ISR status register has reserved bits set (0x%x)", interrupt_status);
+        triple_fault();
+    }
 
     if (interrupt_status & VIRTIO_INTERRUPT_STATUS_USED) {
         uint16_t host_used_idx = vm_shared_readw(&g_fs->requests->used->idx);
