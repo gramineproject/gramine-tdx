@@ -31,9 +31,10 @@
 #define VIRTIO_STATUS_DEVICE_NEEDS_RESET 64  /* device has experienced an unrecoverable error */
 #define VIRTIO_STATUS_FAILED             128 /* smth went wrong in guest (it gave up on device) */
 
-/* possible virtio_regs::interrupt_status_reg flags */
+/* possible virtio_regs::interrupt_status_reg flags, bits 0 and 1 are defined, others reserved */
 #define VIRTIO_INTERRUPT_STATUS_USED     1   /* device used buffer in at least one virtual queue */
 #define VIRTIO_INTERRUPT_STATUS_CONFIG   2   /* configuration of device changed */
+#define VIRTIO_INTERRUPT_STATUS_MASK (VIRTIO_INTERRUPT_STATUS_USED | VIRTIO_INTERRUPT_STATUS_CONFIG)
 
 /* See Section 4.1.4.3 of VIRTIO 1.1 Spec */
 struct virtio_pci_regs {
