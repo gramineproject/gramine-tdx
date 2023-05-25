@@ -176,6 +176,11 @@ static int cleanup_tq(void) {
             return -PAL_ERROR_DENIED;
         }
 
+        if (virtq_is_desc_free(g_vsock->tq, desc_idx)) {
+            /* malicious descriptor index (attempt at double-free attack) */
+            return -PAL_ERROR_DENIED;
+        }
+
         virtq_free_desc(g_vsock->tq, desc_idx);
         g_vsock->tq->seen_used++;
         sent = true;

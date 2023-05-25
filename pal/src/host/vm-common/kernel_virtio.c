@@ -116,11 +116,15 @@ int virtq_alloc_desc(struct virtqueue* virtq, void* addr, uint32_t len, uint16_t
     return 0;
 }
 
-void virtq_free_desc(struct virtqueue* virtq, uint16_t idx) {
+bool virtq_is_desc_free(struct virtqueue* virtq, uint16_t desc_idx) {
+    return virtq->next_free_desc[desc_idx] != 0;
+}
+
+void virtq_free_desc(struct virtqueue* virtq, uint16_t desc_idx) {
     /* rewire head of free-descriptors linked list to this newly-freed descriptor */
     uint32_t old_free_desc_head = virtq->free_desc;
-    virtq->free_desc = idx;
-    virtq->next_free_desc[idx] = old_free_desc_head;
+    virtq->free_desc = desc_idx;
+    virtq->next_free_desc[desc_idx] = old_free_desc_head;
 }
 
 int virtq_add_to_device(struct virtio_pci_regs* regs, struct virtqueue* virtq, uint16_t queue_sel) {
