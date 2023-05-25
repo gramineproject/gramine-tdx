@@ -123,7 +123,8 @@ int virtq_create(uint16_t queue_size, struct virtqueue** out_virtq);
 int virtq_free(struct virtqueue* virtq, uint16_t queue_size);
 int virtq_alloc_desc(struct virtqueue* virtq, void* addr, uint32_t len, uint16_t flags,
                      uint16_t* out_desc_idx);
-void virtq_free_desc(struct virtqueue* virtq, uint16_t desc);
+bool virtq_is_desc_free(struct virtqueue* virtq, uint16_t desc_idx);
+void virtq_free_desc(struct virtqueue* virtq, uint16_t desc_idx);
 int virtq_add_to_device(struct virtio_pci_regs* regs, struct virtqueue* virtq, uint16_t queue_sel);
 
 /* ----------------------------------- virtio-console ------------------------------------------ */
