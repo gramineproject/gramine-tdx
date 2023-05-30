@@ -16,10 +16,6 @@
 #include "kernel_sched.h"
 #include "kernel_time.h"
 
-/* Global lock and futex for waiting for events (very naive but good enough) */
-static spinlock_t g_waiting_events_lock = INIT_SPINLOCK_UNLOCKED;
-static int g_waiting_events_futex;
-
 int pal_common_event_create(struct pal_handle** handle_ptr, bool init_signaled, bool auto_clear) {
     struct pal_handle* handle = calloc(1, HANDLE_SIZE(event));
     if (!handle)
@@ -39,10 +35,9 @@ void pal_common_event_set(struct pal_handle* handle) {
     spinlock_lock(&handle->event.lock);
     __atomic_store_n(&handle->event.signaled, 1, __ATOMIC_RELEASE);
     bool need_wake = handle->event.waiters_cnt > 0;
+    if (need_wake)
+        sched_thread_wakeup(&handle->event.signaled);
     spinlock_unlock(&handle->event.lock);
-    if (need_wake) {
-        sched_thread_wakeup(&g_waiting_events_futex);
-    }
 }
 
 void pal_common_event_clear(struct pal_handle* handle) {
@@ -55,17 +50,20 @@ int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
     int ret;
     uint64_t timeout_absolute_us = 0;
 
+    spinlock_lock(&handle->event.lock);
+
     if (timeout_us && *timeout_us != 0) {
         uint64_t curr_time_us;
         ret = get_time_in_us(&curr_time_us);
-        if (ret < 0)
+        if (ret < 0) {
+            spinlock_unlock(&handle->event.lock);
             return ret;
+        }
 
         timeout_absolute_us = curr_time_us + *timeout_us;
-        register_timeout(timeout_absolute_us, &g_waiting_events_futex);
+        register_timeout(timeout_absolute_us, &handle->event.signaled);
     }
 
-    spinlock_lock(&handle->event.lock);
     handle->event.waiters_cnt++;
 
     while (1) {
@@ -102,17 +100,11 @@ int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
             }
         }
 
-        spinlock_unlock(&handle->event.lock);
-
-        /* spinlock is dummy here; only have it to comply with sched_thread_wait() signature */
-        spinlock_lock(&g_waiting_events_lock);
-        sched_thread_wait(&g_waiting_events_futex, &g_waiting_events_lock);
-        spinlock_unlock(&g_waiting_events_lock);
-
-        spinlock_lock(&handle->event.lock);
+        sched_thread_wait(&handle->event.signaled, &handle->event.lock);
     }
 
     handle->event.waiters_cnt--;
+
     spinlock_unlock(&handle->event.lock);
 
     if (timeout_us) {
@@ -129,4 +121,3 @@ int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
 
     return ret;
 }
-
