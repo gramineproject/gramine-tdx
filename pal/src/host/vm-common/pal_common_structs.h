@@ -99,6 +99,6 @@ struct pal_handle_inner_thread {
 struct pal_handle_inner_event {
     spinlock_t lock;
     uint32_t waiters_cnt;
-    uint32_t signaled;
+    int signaled;
     bool auto_clear;
 };
