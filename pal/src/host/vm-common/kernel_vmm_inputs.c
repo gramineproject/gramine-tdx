@@ -6,6 +6,7 @@
 #include "api.h"
 #include "pal_error.h"
 
+#include "kernel_time.h"
 #include "kernel_vmm_inputs.h"
 #include "vm_callbacks.h"
 
@@ -135,5 +136,24 @@ int host_pwd_init(void) {
         return -PAL_ERROR_INVAL;
 
     /* note that host PWD is guaranteed to be NULL terminated and have at least one symbol */
+    return 0;
+}
+
+int unixtime_init(char* unixtime_s, size_t unixtime_size) {
+    memset(unixtime_s, 0, unixtime_size);
+
+    uint16_t fw_cfg_selector = find_fw_cfg_selector("opt/gramine/unixtime_s");
+    if (!fw_cfg_selector)
+        return -PAL_ERROR_INVAL;
+
+    vm_portio_writew(FW_CFG_PORT_SEL, fw_cfg_selector);
+    for (size_t i = 0; i < unixtime_size - 1; i++)
+        unixtime_s[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
+
+    uint32_t len = strlen(unixtime_s);
+    if (len == 0 || len >= TIME_S_STR_MAX)
+        return -PAL_ERROR_INVAL;
+
+    /* note that `unixtime_s` is guaranteed to be NULL terminated and have at least one symbol */
     return 0;
 }
