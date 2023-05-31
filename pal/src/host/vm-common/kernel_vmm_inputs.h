@@ -48,3 +48,5 @@ int host_pwd_init(void);
 
 int cmdline_read_gramine_args(const char* cmdline, int* out_argc, const char** out_argv);
 int cmdline_init(char* cmdline, size_t cmdline_size);
+
+int unixtime_init(char* unixtime_s, size_t unixtime_size);

@@ -14,6 +14,7 @@
 
 #include "kernel_sched.h"
 #include "kernel_time.h"
+#include "kernel_vmm_inputs.h"
 
 DEFINE_LIST(pending_timeout);
 struct pending_timeout {
@@ -88,11 +89,24 @@ int notify_about_timeouts_uninterruptable(void) {
 
 int time_init(void) {
     assert(g_tsc_mhz);
+    char unixtime_s[TIME_S_STR_MAX];
 
     g_start_tsc = get_tsc();
 
-    /* FIXME: ideally should be set to some real time (number of seconds since the Epoch) on
-     *        startup, e.g., a command-line argument from VMM */
-    g_start_us = 0;
+    /* Get the UNIX time value on startup from the VMM using "FW CFG" feature of QEMU. Note that
+     * this time value is untrusted.
+     * TODO: get the UNIX time value from a trusted time source, like a trusted remote server. */
+    unixtime_init(unixtime_s, sizeof(unixtime_s));
+    uint64_t start_s = atol(unixtime_s);
+
+    /* sanity checks: the obtained untrusted UNIX time must be in a reasonable range e.g., in
+     * [1672531200, 1988150400), that is
+     * [`TZ=UTC date -d "Jan 1 2023" +%s`, `TZ=UTC date -d "Jan 1 2033" +%s`) */
+    if (start_s < 1672531200 || start_s >= 1988150400) {
+        return -PAL_ERROR_INVAL;
+    }
+
+    g_start_us = start_s * TIME_US_IN_S;
+
     return 0;
 }
