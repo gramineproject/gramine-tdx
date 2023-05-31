@@ -162,7 +162,7 @@ int pal_common_socket_create(enum pal_socket_domain domain, enum pal_socket_type
     struct pal_handle* handle = create_sock_handle(fd, domain, type, handle_ops, sock_ops,
                                                    !!(options & PAL_OPTION_NONBLOCK));
     if (!handle) {
-        int ret = virtio_vsock_close(fd);
+        int ret = virtio_vsock_close(fd, VSOCK_CLOSE_TIMEOUT_US);
         if (ret < 0) {
             log_error("closing socket fd failed: %s", pal_strerror(ret));
         }
@@ -177,7 +177,7 @@ static void pal_common_socket_destroy(struct pal_handle* handle) {
     assert(handle->hdr.type == PAL_TYPE_SOCKET);
 
     spinlock_lock(&handle->sock.lock);
-    int ret = virtio_vsock_close(handle->sock.fd);
+    int ret = virtio_vsock_close(handle->sock.fd, VSOCK_CLOSE_TIMEOUT_US);
     spinlock_unlock(&handle->sock.lock);
 
     if (ret < 0) {
@@ -258,7 +258,7 @@ static int pal_common_tcp_accept(struct pal_handle* handle, pal_stream_options_t
                                                    handle->sock.ops,
                                                    !!(options & PAL_OPTION_NONBLOCK));
     if (!client) {
-        ret = virtio_vsock_close(client_fd);
+        ret = virtio_vsock_close(client_fd, VSOCK_CLOSE_TIMEOUT_US);
         if (ret < 0) {
             log_error("closing socket fd failed: %s", pal_strerror(ret));
         }
@@ -295,7 +295,8 @@ static int pal_common_socket_connect(struct pal_handle* handle, struct pal_socke
     struct sockaddr_vm addr_vm = { .svm_cid = g_vsock->host_cid };
     pal_to_vm_sockaddr(addr, &addr_vm);
 
-    int ret = virtio_vsock_connect(handle->sock.fd, &addr_vm, sizeof(addr_vm));
+    int ret = virtio_vsock_connect(handle->sock.fd, &addr_vm, sizeof(addr_vm),
+                                   VSOCK_CONNECT_TIMEOUT_US);
     if (ret < 0)
         return ret;
 
@@ -461,7 +462,7 @@ static int pal_common_tcp_delete(struct pal_handle* handle, enum pal_delete_mode
             return -PAL_ERROR_INVAL;
     }
 
-    int ret = virtio_vsock_shutdown(handle->sock.fd, shutdown);
+    int ret = virtio_vsock_shutdown(handle->sock.fd, shutdown, VSOCK_CLOSE_TIMEOUT_US);
 
     /* maybe some other thread was waiting on this socket, notify waiting events (select/poll) */
     sched_thread_wakeup(&g_streams_waiting_events_futex);
