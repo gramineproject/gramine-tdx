@@ -347,14 +347,21 @@ noreturn int pal_start_continue(void* cmdline_) {
     if (!first_process)
         INIT_FAIL("Gramine-TDX currently runs only in single-process mode (with `init`)");
 
-    char* manifest_path = alloc_concat(argv[1], -1, ".manifest", -1);
-    if (!manifest_path)
+    /* hack to re-use .manifest.sgx file if .manifest.tdx not found */
+    char* manifest_path_tdx = alloc_concat(argv[1], -1, ".manifest.tdx", -1);
+    if (!manifest_path_tdx)
+        INIT_FAIL("Out of memory");
+
+    char* manifest_path_sgx = alloc_concat(argv[1], -1, ".manifest.sgx", -1);
+    if (!manifest_path_sgx)
         INIT_FAIL("Out of memory");
 
     char* manifest = NULL;
-    ret = read_text_file_to_cstr(manifest_path, &manifest, /*out_size=*/NULL);
+    ret = read_text_file_to_cstr(manifest_path_tdx, &manifest, /*out_size=*/NULL);
+    if (ret == -PAL_ERROR_STREAMNOTEXIST)
+        ret = read_text_file_to_cstr(manifest_path_sgx, &manifest, /*out_size=*/NULL);
     if (ret < 0)
-        INIT_FAIL("Reading manifest failed");
+        INIT_FAIL("Reading manifest failed (tried .manifest.tdx and .manifest.sgx extensions)");
 
     g_pal_common_state.raw_manifest_data = manifest;
 
