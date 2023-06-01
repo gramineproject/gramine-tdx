@@ -51,18 +51,30 @@ struct pal_handle_inner_dir {
     bool endofstream;
 };
 
-struct pal_handle_inner_pipe {
+/* sub-object of pal_handle_inner_pipe: two pipe objects share one pipe_buf object */
+struct pal_handle_inner_pipe_buf {
     spinlock_t lock;
-    int        connect_futex;
-    int        writer_futex;
-    int        reader_futex;
-    bool       waitedfor;    /* whether any PalStreamsWaitEvents() waits on this pipe */
-    char*      buf;          /* ring buffer of size PIPE_BUF_SIZE */
+    int        refcount;
+    bool       writable;
+    bool       readable;
     uint64_t   write_pos;    /* must be always used as buf[write_pos % PIPE_BUF_SIZE] */
     uint64_t   read_pos;     /* must be always used as buf[read_pos % PIPE_BUF_SIZE] */
-    bool       nonblocking;
-    char       name[PIPE_NAME_MAX]; /* for server pipe type */
-    struct pal_handle* peer;        /* for UNIX domain socket-style pipes */
+    int        writer_futex;
+    int        reader_futex;
+    bool       poll_waiting; /* for PalStreamsWaitEvents; protected by lock */
+    char       buf[];        /* ring buffer of size PIPE_BUF_SIZE */
+};
+
+struct pal_handle_inner_pipe {
+    bool nonblocking;
+    char name[PIPE_NAME_MAX];
+
+    /* only for pipesrv type */
+    int  connect_futex;
+    bool connect_poll_waiting; /* for PalStreamsWaitEvents; protected by g_connecting_pipes_lock */
+
+    /* only for pipe/pipecli types -- read/write ends of the pipe */
+    struct pal_handle_inner_pipe_buf* pipe_buf; /* protected by g_connecting_pipes_lock */
 };
 
 struct pal_handle_inner_sock {
