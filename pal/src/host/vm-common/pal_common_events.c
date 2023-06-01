@@ -49,6 +49,7 @@ void pal_common_event_clear(struct pal_handle* handle) {
 int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
     int ret;
     uint64_t timeout_absolute_us = 0;
+    void* timeout = NULL;
 
     spinlock_lock(&handle->event.lock);
 
@@ -61,7 +62,11 @@ int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
         }
 
         timeout_absolute_us = curr_time_us + *timeout_us;
-        register_timeout(timeout_absolute_us, &handle->event.signaled);
+        ret = register_timeout(timeout_absolute_us, &handle->event.signaled, &timeout);
+        if (ret < 0) {
+            spinlock_unlock(&handle->event.lock);
+            return ret;
+        }
     }
 
     handle->event.waiters_cnt++;
@@ -76,47 +81,48 @@ int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
 
         if (!needs_sleep) {
             ret = 0;
-            break;
-        }
-
-        if (timeout_us && *timeout_us == 0) {
-            /* user instructed not to sleep, so return immediately */
-            ret = 0;
-            break;
+            goto out;
         }
 
         if (timeout_us) {
+            if (*timeout_us == 0) {
+                /* user instructed not to sleep, so return immediately */
+                ret = 0;
+                goto out;
+            }
+
             /* check if timeout expired */
             assert(timeout_absolute_us);
 
             uint64_t curr_time_us;
             ret = get_time_in_us(&curr_time_us);
             if (ret < 0)
-                break;
+                goto out;
 
             if (timeout_absolute_us <= curr_time_us) {
                 ret = -PAL_ERROR_TRYAGAIN;
-                break;
+                goto out;
             }
         }
 
+        /* event wasn't yet signalled, need to sleep waiting on this event */
         sched_thread_wait(&handle->event.signaled, &handle->event.lock);
     }
 
+    ret = 0;
+out:
     handle->event.waiters_cnt--;
-
     spinlock_unlock(&handle->event.lock);
 
-    if (timeout_us) {
-        uint64_t curr_time_us;
-        get_time_in_us(&curr_time_us);
+    if (timeout)
+        deregister_timeout(timeout);
 
-        if (timeout_absolute_us <= curr_time_us)
-            *timeout_us = 0;
-        else
-            *timeout_us = timeout_absolute_us - curr_time_us;
-
-        assert(ret != -PAL_ERROR_TRYAGAIN || *timeout_us == 0);
+    if (timeout_us && *timeout_us != 0) {
+        uint64_t curr_us;
+        int get_time_ret = get_time_in_us(&curr_us);
+        if (!get_time_ret) {
+            *timeout_us = timeout_absolute_us > curr_us ? timeout_absolute_us - curr_us : 0;
+        }
     }
 
     return ret;
