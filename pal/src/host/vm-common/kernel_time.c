@@ -49,7 +49,10 @@ int get_time_in_us(uint64_t* out_us) {
     return 0;
 }
 
-int register_timeout(uint64_t timeout_absolute_us, int* futex) {
+int register_timeout(uint64_t timeout_absolute_us, int* futex, void** timeout_out) {
+    if (!timeout_out)
+        return -PAL_ERROR_INVAL;
+
     struct pending_timeout* timeout = malloc(sizeof(*timeout));
     if (!timeout)
         return -PAL_ERROR_NOMEM;
@@ -63,7 +66,27 @@ int register_timeout(uint64_t timeout_absolute_us, int* futex) {
     spinlock_lock_disable_irq(&g_pending_timeouts_list_lock);
     LISTP_ADD(timeout, &g_pending_timeouts_list, list);
     spinlock_unlock_enable_irq(&g_pending_timeouts_list_lock);
+
+    *timeout_out = (void*)timeout;
     return 0;
+}
+
+void deregister_timeout(void* _timeout) {
+    struct pending_timeout* timeout = (struct pending_timeout*)_timeout;
+
+    /* g_pending_timeouts_list is used by interrupt-handler's notify_about_timeouts();
+     * temporarily disable interrupts to avoid deadlock */
+    spinlock_lock_disable_irq(&g_pending_timeouts_list_lock);
+    struct pending_timeout* list_timeout;
+    struct pending_timeout* tmp;
+    LISTP_FOR_EACH_ENTRY_SAFE(list_timeout, tmp, &g_pending_timeouts_list, list) {
+        if (list_timeout == timeout) {
+            LISTP_DEL(timeout, &g_pending_timeouts_list, list);
+        }
+    }
+    spinlock_unlock_enable_irq(&g_pending_timeouts_list_lock);
+
+    free(timeout);
 }
 
 int notify_about_timeouts_uninterruptable(void) {
@@ -81,7 +104,6 @@ int notify_about_timeouts_uninterruptable(void) {
         if (timeout->timeout_absolute_us <= curr_time_us) {
             sched_thread_wakeup_uninterruptable(timeout->futex);
             LISTP_DEL(timeout, &g_pending_timeouts_list, list);
-            free(timeout);
         }
     }
     return 0;

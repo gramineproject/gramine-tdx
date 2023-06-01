@@ -145,18 +145,25 @@ int pal_common_streams_wait_events(size_t count, struct pal_handle** handle_arra
     int ret;
     bool any_event_found = false;
     uint64_t timeout_absolute_us = 0;
+    void* timeout = NULL;
+
+    spinlock_lock(&g_streams_waiting_events_lock);
 
     if (timeout_us && *timeout_us != 0) {
         uint64_t curr_time_us;
         ret = get_time_in_us(&curr_time_us);
-        if (ret < 0)
+        if (ret < 0) {
+            spinlock_unlock(&g_streams_waiting_events_lock);
             return ret;
+        }
 
         timeout_absolute_us = curr_time_us + *timeout_us;
-        register_timeout(timeout_absolute_us, &g_streams_waiting_events_futex);
+        ret = register_timeout(timeout_absolute_us, &g_streams_waiting_events_futex, &timeout);
+        if (ret < 0) {
+            spinlock_unlock(&g_streams_waiting_events_lock);
+            return ret;
+        }
     }
-
-    spinlock_lock(&g_streams_waiting_events_lock);
 
     while (!any_event_found) {
         for (size_t i = 0; i < count; i++) {
@@ -202,6 +209,11 @@ int pal_common_streams_wait_events(size_t count, struct pal_handle** handle_arra
 
     ret = 0;
 out:
+    spinlock_unlock(&g_streams_waiting_events_lock);
+
+    if (timeout)
+        deregister_timeout(timeout);
+
     if (timeout_us && *timeout_us != 0) {
         uint64_t curr_us;
         int get_time_ret = get_time_in_us(&curr_us);
@@ -209,6 +221,6 @@ out:
             *timeout_us = timeout_absolute_us > curr_us ? timeout_absolute_us - curr_us : 0;
         }
     }
-    spinlock_unlock(&g_streams_waiting_events_lock);
+
     return ret;
 }
