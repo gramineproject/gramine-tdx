@@ -14,6 +14,7 @@
 #include "list.h"
 #include "pal.h"
 #include "pal_common.h"
+#include "pal_common_tf.h"
 #include "pal_error.h"
 #include "pal_host.h"
 #include "pal_internal.h"
@@ -400,6 +401,20 @@ noreturn int pal_start_continue(void* cmdline_) {
     ret = pal_common_get_topo_info(&g_pal_public_state.topo_info);
     if (ret < 0)
         INIT_FAIL("Failed to get topology information: %s", pal_strerror(ret));
+
+    ret = init_file_check_policy();
+    if (ret < 0)
+        INIT_FAIL("Failed to load the file check policy: %s", pal_strerror(ret));
+
+    ret = init_allowed_files();
+    if (ret < 0)
+        INIT_FAIL("Failed to initialize allowed files: %s", pal_strerror(ret));
+
+    ret = init_trusted_files();
+    if (ret < 0)
+        INIT_FAIL("Failed to initialize trusted files: %s", pal_strerror(ret));
+
+    g_use_trusted_files = true;
 
     pal_main(/*instance_id=*/0, /*parent_process=*/NULL, g_first_thread_handle, argv + 1, envp,
              /*post_callback=*/NULL);
