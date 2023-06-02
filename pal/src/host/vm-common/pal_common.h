@@ -23,6 +23,8 @@ struct pal_tcb_vm {
     };
 };
 
+extern bool g_use_trusted_files;
+
 extern int g_streams_waiting_events_futex;
 extern spinlock_t g_connecting_pipes_lock;
 extern LISTP_TYPE(pal_handle) g_server_pipes_list;

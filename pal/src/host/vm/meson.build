@@ -107,6 +107,7 @@ libpal_vm = executable('pal',
 
     dependencies: [
         common_dep,
+        cryptoadapter_dep,
     ],
 
     install: true,
