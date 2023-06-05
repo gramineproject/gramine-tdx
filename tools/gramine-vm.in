@@ -34,10 +34,60 @@ if [ "$APPLICATION" == "" ]; then
     exit 2
 fi
 
+# Try to get the VM memory config from `.manifest.tdx` file, by parsing `tdx.enclave_size` value.
+# If this fails, try alternatively with `.manifest.sgx` and `sgx.enclave_size`
+#
+# We enforce a 1GB lower limit for VM memory because (a) Gramine VM kernel reserves ~512MB for
+# shared virtio-queues memory, page tables, PAL binary, etc. and (b) for simplicity we want to reuse
+# already-existing SGX manifests, thus we don't want to bump `sgx.enclave_size` to 1GB explicitly.
+export GRAMINE_MANIFEST=$APPLICATION.manifest
+QEMU_MEM_SIZE=$(python3 -c "
+import os
+import re
+import sys
+from graminelibos import Manifest
+
+manifests = {
+    'tdx': os.environ['GRAMINE_MANIFEST'] + '.tdx',
+    'sgx': os.environ['GRAMINE_MANIFEST'] + '.sgx',
+}
+
+size_str = ''
+for type, file in manifests.items():
+    try:
+        with open(file, 'rb') as f:
+            manifest_data = f.read()
+        manifest = Manifest.loads(manifest_data.decode('utf-8'))
+        size_str = manifest[type]['enclave_size']
+        break
+    except Exception:
+        continue
+else:
+    sys.exit(1)
+
+unit = 1
+if size_str.endswith('G'):
+    unit = 1024 * 1024 * 1024
+elif size_str.endswith('M'):
+    unit = 1024 * 1024
+elif size_str.endswith('K'):
+    unit = 1024
+
+try:
+    size = int(re.search(r'\d+', size_str).group())
+    print(size_str if unit * size > 1024 * 1024 * 1024 else '1G')
+except Exception:
+    sys.exit(1)
+")
+# If file parsing fails, then try the config from environment variable `GRAMINE_RAM_SIZE`.
+QEMU_MEM_SIZE=${QEMU_MEM_SIZE:-$GRAMINE_RAM_SIZE}
+# If both file and envvar parsing fail, then fall back to the default value of 8GB.
+QEMU_MEM_SIZE=${QEMU_MEM_SIZE:-"8G"}
+
 QEMU_PATH="qemu"
-QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc -m 8G -smp 1"
+QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc -m $QEMU_MEM_SIZE -smp 1"
 QEMU_OPTS="-enable-kvm -vga none -nographic -no-reboot -monitor chardev:mux -no-hpet \
-    -object memory-backend-file,id=mem,size=8G,mem-path=/dev/shm,share=on \
+    -object memory-backend-file,id=mem,size=$QEMU_MEM_SIZE,mem-path=/dev/shm,share=on \
     -numa node,memdev=mem"
 
 if [ "$TDSHIM_PAL_PATH" == "" ]; then
