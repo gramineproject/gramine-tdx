@@ -79,7 +79,7 @@ if tdx
     conf_gramine_tdx.set_quoted('TDSHIM_PAL_PATH', join_paths(hostpalpath_tdx, 'tdshim-pal'))
 
     configure_file(
-        input: 'gramine-tdx.in',
+        input: 'gramine-vm.in',
         output: 'gramine-tdx',
         configuration: conf_gramine_tdx,
         install_dir: get_option('bindir'),

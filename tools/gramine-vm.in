@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 # Copyright (C) 2023 Intel Corporation
 
-# This file is based on `gramine.in` and modified for Virtual Machine (VM)
-# environment and QEMU hypervisor.
+# This file is based on `gramine.in` and modified for VM/TDX environment and QEMU.
 
 BIOS_PATH=@BIOS_PATH@
 LIBPAL_PATH=@LIBPAL_PATH@
 HOST_PAL_PATH=@HOST_PAL_PATH@
+TDSHIM_PAL_PATH=@TDSHIM_PAL_PATH@
 
 APPLICATION=
 QEMU_GDB=
@@ -35,13 +35,20 @@ if [ "$APPLICATION" == "" ]; then
 fi
 
 QEMU_PATH="qemu"
-#QEMU_VM="-cpu host,-sgx,-pks ..."
-QEMU_VM="-cpu host,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc -m 8G -smp 1"
+QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc -m 8G -smp 1"
 QEMU_OPTS="-enable-kvm -vga none -nographic -no-reboot -monitor chardev:mux -no-hpet \
     -object memory-backend-file,id=mem,size=8G,mem-path=/dev/shm,share=on \
     -numa node,memdev=mem"
 
+if [ "$TDSHIM_PAL_PATH" == "" ]; then
 QEMU_MACHINE="-M q35,kernel_irqchip=split"
+QEMU_BINARIES="-kernel $LIBPAL_PATH -device loader,file=$BIOS_PATH"
+else
+QEMU_MACHINE="-M q35,kernel_irqchip=split,confidential-guest-support=tdx \
+    -object tdx-guest,id=tdx,quote-generation-service=vsock:2:4050"
+QEMU_BINARIES="-bios $TDSHIM_PAL_PATH"
+fi
+
 QEMU_VIRTIO_CONSOLE="-device virtio-serial,iommu_platform=off,romfile= \
                      -chardev stdio,id=mux,mux=on \
                      -device virtconsole,chardev=mux -serial chardev:mux"
@@ -54,8 +61,7 @@ GRAMINE_ARGS="-gramine init \"$APPLICATION\" $@ -gramine-end"
 CMD=("${ENVS[@]}")
 CMD+=("${PREFIX[@]}")
 CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
-        $QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK \
-        -kernel "$LIBPAL_PATH" -device loader,file="$BIOS_PATH" \
+        $QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK $QEMU_BINARIES \
         -fw_cfg name=opt/gramine/pwd,string="$PWD" \
         -fw_cfg name=opt/gramine/cmdline,string="$GRAMINE_ARGS" \
         -fw_cfg name=opt/gramine/unixtime_s,string="$EPOCHSECONDS")
