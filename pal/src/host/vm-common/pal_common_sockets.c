@@ -15,14 +15,12 @@
 #include "pal_common.h"
 #include "pal_error.h"
 #include "pal_internal.h"
+#include "socket_utils.h"
 #include "spinlock.h"
 
 #include "kernel_sched.h"
 #include "kernel_virtio.h"
 #include "kernel_virtio_vsock.h"
-
-#define PAL_SOCKADDR_SIZE 96 /* minimal size of buffer to store an IPv4/IPv6 address */
-#define PAL_SOCKADDR_IP "127.0.0.1"
 
 static struct handle_ops g_tcp_handle_ops;
 static struct handle_ops g_udp_handle_ops;
@@ -53,20 +51,23 @@ static size_t sanitize_size(size_t size) {
     return size;
 }
 
-/* always returns the localhost address (127.0.0.1 for IPv4 and ::1 for IPv6) */
+/* always returns the localhost address (127.0.0.1 for IPv4 and ::1 for IPv6); note that
+ * pal_socket_addr::port is big-endian whereas sockaddr_vm::port is host-byte (little-endian) */
 static void vm_to_pal_sockaddr(enum pal_socket_domain domain, const struct sockaddr_vm* vm_addr,
                                struct pal_socket_addr* pal_addr) {
     switch (domain) {
         case PAL_IPV4:;
             pal_addr->domain = PAL_IPV4;
-            pal_addr->ipv4.port = vm_addr->svm_port;
-            pal_addr->ipv4.addr = 2130706433; /* uint32 representation of localhost (127.0.0.1) */
+            pal_addr->ipv4.port = htons((uint16_t)vm_addr->svm_port);
+
+            uint8_t ipv4_localhost_addr[4] = {127, 0, 0, 1};
+            memcpy(&pal_addr->ipv4.addr, ipv4_localhost_addr, sizeof(pal_addr->ipv4.addr));
             break;
         case PAL_IPV6:;
             pal_addr->domain = PAL_IPV6;
             pal_addr->ipv6.flowinfo = 0;
             pal_addr->ipv6.scope_id = 0;
-            pal_addr->ipv6.port = vm_addr->svm_port;
+            pal_addr->ipv6.port = htons((uint16_t)vm_addr->svm_port);
 
             uint16_t ipv6_localhost_addr[8] = {0, 0, 0, 0, 0, 0, 0, 1};
             memcpy(pal_addr->ipv6.addr, ipv6_localhost_addr, sizeof(pal_addr->ipv6.addr));
@@ -79,17 +80,15 @@ static void vm_to_pal_sockaddr(enum pal_socket_domain domain, const struct socka
     }
 }
 
-/* always returns the localhost address (127.0.0.1 for IPv4 and ::1 for IPv6) */
 static void pal_to_vm_sockaddr(const struct pal_socket_addr* pal_addr, struct sockaddr_vm* vm_addr) {
     switch (pal_addr->domain) {
         case PAL_IPV4:;
             vm_addr->svm_family = AF_VSOCK;
-            vm_addr->svm_port   = pal_addr->ipv4.port;
+            vm_addr->svm_port   = ntohs(pal_addr->ipv4.port);
             break;
         case PAL_IPV6:;
             vm_addr->svm_family = AF_VSOCK;
-            vm_addr->svm_port   = pal_addr->ipv6.port;
-            vm_addr->svm_cid    = g_vsock->host_cid;
+            vm_addr->svm_port   = ntohs(pal_addr->ipv6.port);
             break;
         case PAL_DISCONNECT:
             log_error("connect(AF_UNSPEC) is not yet implemented!");
@@ -206,12 +205,12 @@ static int pal_common_socket_bind(struct pal_handle* handle, struct pal_socket_a
     switch (addr->domain) {
         case PAL_IPV4:
             if (!addr->ipv4.port) {
-                addr->ipv4.port = new_port;
+                addr->ipv4.port = htons(new_port);
             }
             break;
         case PAL_IPV6:
             if (!addr->ipv6.port) {
-                addr->ipv6.port = new_port;
+                addr->ipv6.port = htons(new_port);
             }
             break;
         default:
