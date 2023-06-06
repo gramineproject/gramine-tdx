@@ -122,61 +122,31 @@ static int add_preloaded_range(uintptr_t addr, size_t size, const char* comment)
     return pal_add_initial_range(addr, size, /*pal_prot=*/0, comment);
 }
 
-static int tdx_extend_rtmr2_with_loader_entrypoint(void) {
-    assert(g_pal_public_state.manifest_root);
-
-    int ret;
+/* note that manifest_size is the *file* size, i.e. it is the length of the `manifest` C string */
+static int tdx_extend_rtmr2_with_manifest(const char* manifest, size_t manifest_size) {
     __attribute__((aligned(64))) uint8_t rtmr2_buffer[48] = {0};
 
-    char* loader_entrypoint_uri = NULL;
-    char* loader_entrypoint_contents = NULL;
-    size_t loader_entrypoint_contents_size = 0;
+    if (!manifest_size || manifest[manifest_size] != '\0')
+        return -PAL_ERROR_INVAL;
 
-    ret = toml_string_in(g_pal_public_state.manifest_root, "loader.entrypoint",
-                         &loader_entrypoint_uri);
-    if (ret < 0) {
-        ret = -PAL_ERROR_DENIED;
-        goto out;
-    }
-
-    if (!loader_entrypoint_uri || !strstartswith(loader_entrypoint_uri, URI_PREFIX_FILE)) {
-        ret = -PAL_ERROR_INVAL;
-        goto out;
-    }
-
-    ret = read_text_file_to_cstr(loader_entrypoint_uri + static_strlen(URI_PREFIX_FILE),
-                                 &loader_entrypoint_contents, &loader_entrypoint_contents_size);
-    if (ret < 0)
-        goto out;
-    if (!loader_entrypoint_contents || !loader_entrypoint_contents_size) {
-        ret = -PAL_ERROR_INVAL;
-        goto out;
-    }
-
-    /* FIXME: replace with SHA384 when our common code exports it */
+    /* FIXME: replace with SHA384 when our common code exports it (that's what
+     *        tdx_tdcall_mr_rtmr_extend API expects) */
     LIB_SHA256_CONTEXT sha;
-    ret = lib_SHA256Init(&sha);
+    int ret = lib_SHA256Init(&sha);
     if (ret < 0)
-        goto out;
-    ret = lib_SHA256Update(&sha, (uint8_t*)loader_entrypoint_contents,
-                           loader_entrypoint_contents_size);
+        return ret;
+    ret = lib_SHA256Update(&sha, (uint8_t*)manifest, manifest_size);
     if (ret < 0)
-        goto out;
+        return ret;
     ret = lib_SHA256Final(&sha, rtmr2_buffer);
     if (ret < 0)
-        goto out;
+        return ret;
 
     long tdx_ret = tdx_tdcall_mr_rtmr_extend((uint64_t)&rtmr2_buffer, /*rtmr_index=*/2);
-    if (tdx_ret) {
-        ret = -PAL_ERROR_DENIED;
-        goto out;
-    }
+    if (tdx_ret)
+        return ret;
 
-    ret = 0;
-out:
-    free(loader_entrypoint_uri);
-    free(loader_entrypoint_contents);
-    return ret;
+    return 0;
 }
 
 noreturn static void print_usage_and_exit(void) {
@@ -358,9 +328,10 @@ noreturn int pal_start_continue(void* cmdline_) {
         INIT_FAIL("Out of memory");
 
     char* manifest = NULL;
-    ret = read_text_file_to_cstr(manifest_path_tdx, &manifest, /*out_size=*/NULL);
+    size_t manifest_size;
+    ret = read_text_file_to_cstr(manifest_path_tdx, &manifest, &manifest_size);
     if (ret == -PAL_ERROR_STREAMNOTEXIST)
-        ret = read_text_file_to_cstr(manifest_path_sgx, &manifest, /*out_size=*/NULL);
+        ret = read_text_file_to_cstr(manifest_path_sgx, &manifest, &manifest_size);
     if (ret < 0)
         INIT_FAIL("Reading manifest failed (tried .manifest.tdx and .manifest.sgx extensions)");
 
@@ -373,20 +344,14 @@ noreturn int pal_start_continue(void* cmdline_) {
 
     /*
      * TD-Shim already extended RTMR[0] and RTMR[1] with TD-Shim configuration and the payload (this
-     * PAL binary) respectively. Gramine extends RTMR[2] with LibOS (more specifically, with
-     * `loader.entrypoint`) measurement. This measurement is calculated as follows: take SHA256 hash
-     * over the contents of the `loader.entrypoint` binary, then feed it as input to rtmr-extend
-     * TDX operation (it will perform SHA384 over [prev_rtmr_value_in_first_48bits +
+     * PAL binary) respectively. Gramine extends RTMR[2] with the manifest file. This measurement is
+     * calculated as follows: take SHA256 hash over the manifest contents, then feed it as input to
+     * rtmr-extend TDX operation (it will perform SHA384 over [prev_rtmr_value_in_first_48bits +
      * input_in_next_48bits]).
-     *
-     * FIXME: Alternatively, Gramine could extend RTMR[2] with the manifest file measurement. Since
-     *        the manifest contains hashes of LibOS binary and all other binaries, this may be a
-     *        better measurement input.
      */
-    ret = tdx_extend_rtmr2_with_loader_entrypoint();
+    ret = tdx_extend_rtmr2_with_manifest(manifest, manifest_size);
     if (ret < 0)
-        INIT_FAIL("Failed to extend TDX RTMR2 with `loader.entrypoint` binary: %s",
-                  pal_strerror(ret));
+        INIT_FAIL("Failed to extend TDX RTMR2 with manifest contents: %s", pal_strerror(ret));
 
     ret = toml_bool_in(g_pal_public_state.manifest_root,
                        "sys.enable_extra_runtime_domain_names_conf", /*defaultval=*/false,
