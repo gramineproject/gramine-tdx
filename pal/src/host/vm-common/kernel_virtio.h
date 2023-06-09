@@ -303,7 +303,10 @@ struct virtio_vsock {
     uint32_t tx_cnt;         /* total bytes sent by guest on tq */
     uint32_t msg_cnt;        /* total number of received msgs */
 
-    struct virtio_vsock_connection conns[VSOCK_MAX_CONNECTIONS];
+    uint32_t conns_size;                    /* size of dynamic array */
+    struct virtio_vsock_connection** conns; /* dynamic array: fd -> connection */
+
+    struct virtio_vsock_connection* conns_by_host_port; /* hash table: host port -> connection */
 
     /* statically allocated in shared memory, accesses via vm_shared_writex() */
     char* shared_rq_buf;  /* internal buffer where incoming packets are copied from */
