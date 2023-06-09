@@ -1096,6 +1096,9 @@ int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
     void* timeout = NULL;
     struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
 
+    if (conn->state == VIRTIO_VSOCK_CLOSE)
+        return 0;
+
     if (conn->state != VIRTIO_VSOCK_ESTABLISHED && conn->state != VIRTIO_VSOCK_LISTEN)
         return -PAL_ERROR_NOTCONNECTION;
 
