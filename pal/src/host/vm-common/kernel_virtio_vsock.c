@@ -207,33 +207,150 @@ int virtio_vsock_bottomhalf(void) {
     return 0;
 }
 
-static uint32_t pick_new_port(void) {
-    uint32_t max_port = 1000; /* start port numbering from 1000, for no particular reason */
-    for (int i = 0; i < VSOCK_MAX_CONNECTIONS; i++)
-        if (g_vsock->conns[i].guest_port > max_port)
-            max_port = g_vsock->conns[i].guest_port;
+static int enlarge_conns(uint32_t new_size) {
+    if (new_size <= g_vsock->conns_size)
+        return 0;
+
+    struct virtio_vsock_connection** new_conns = calloc(new_size, sizeof(*new_conns));
+    if (!new_conns)
+        return -PAL_ERROR_NOMEM;
+
+    memcpy(new_conns, g_vsock->conns, g_vsock->conns_size * sizeof(*new_conns));
+    free(g_vsock->conns);
+
+    g_vsock->conns_size = new_size;
+    g_vsock->conns      = new_conns;
+    return 0;
+}
+
+static struct virtio_vsock_connection* get_connection(uint32_t fd) {
+    if (fd >= g_vsock->conns_size)
+        return NULL;
+
+    struct virtio_vsock_connection* conn = g_vsock->conns[fd];
+    if (!conn)
+        return NULL;
+
+    assert(conn->fd == fd);
+    return conn;
+}
+
+static int attach_connection(struct virtio_vsock_connection* conn) {
+    int ret;
+
+    uint32_t idx = 0;
+    while (idx < g_vsock->conns_size) {
+        if (!g_vsock->conns[idx]) {
+            /* found unused idx */
+            break;
+        }
+        idx++;
+    }
+
+    if (idx == g_vsock->conns_size) {
+        uint32_t new_size = g_vsock->conns_size;
+        if (__builtin_mul_overflow(new_size, 2, &new_size))
+            return -PAL_ERROR_DENIED;
+        ret = enlarge_conns(new_size);
+        if (ret < 0)
+            return ret;
+    }
+
+    assert(idx < g_vsock->conns_size);
+    g_vsock->conns[idx] = conn;
+    conn->fd = idx;
+    return 0;
+}
+
+static void detach_connection(uint32_t fd) {
+    struct virtio_vsock_connection* conn = get_connection(fd);
+    if (!conn)
+        return;
+
+    g_vsock->conns[fd] = NULL;
+    conn->fd = UINT32_MAX;
+}
+
+static void host_port_add(struct virtio_vsock_connection* conn) {
+    HASH_ADD(hh_host_port, g_vsock->conns_by_host_port, host_port, sizeof(conn->host_port), conn);
+}
+
+static void host_port_delete(struct virtio_vsock_connection* conn) {
+    HASH_DELETE(hh_host_port, g_vsock->conns_by_host_port, conn);
+}
+
+static void host_port_find(uint64_t host_port, struct virtio_vsock_connection** out_conn) {
+    struct virtio_vsock_connection* conn = NULL;
+    HASH_FIND(hh_host_port, g_vsock->conns_by_host_port, &host_port, sizeof(host_port), conn);
+    *out_conn = conn;
+}
+
+/* TODO: Use a better scheme (e.g., a bitmap vector) to allow the reuse of the closed ports. */
+static uint64_t pick_new_port(void) {
+    uint64_t max_port = VSOCK_STARTING_PORT;
+    for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
+        struct virtio_vsock_connection* conn = g_vsock->conns[i];
+        if (conn && conn->guest_port > max_port)
+            max_port = conn->guest_port;
+    }
     return max_port + 1;
 }
 
-static void init_connection(struct virtio_vsock_connection* conn) {
-    conn->state = VIRTIO_VSOCK_CLOSE;
-    sched_thread_wakeup(&conn->state_futex);
-    conn->host_port    = 0;
-    conn->guest_port   = 0;
-    conn->pending_conn = VSOCK_MAX_CONNECTIONS;
+static void init_connection(struct virtio_vsock_connection* conn, uint64_t host_port,
+                            uint64_t guest_port, enum virtio_vsock_state state) {
+    /* do not reset conn->fd, it will be done via attach_connection() if needed */
+
+    conn->state = state;
+    if (state == VIRTIO_VSOCK_CLOSE)
+        sched_thread_wakeup(&conn->state_futex);
+
+    conn->host_port  = host_port;
+    conn->guest_port = guest_port;
+
+    conn->pending_conn_fd = UINT32_MAX;
+
     conn->prepared_for_user = 0;
     conn->consumed_by_user  = 0;
+
     spinlock_init(&conn->state_lock);
-    /* the value doesn't matter, set just for sanity */
-    conn->state_futex = 0;
+    conn->state_futex = 0; /* the value doesn't matter, set just for sanity */
 }
 
-static void reinit_connection(struct virtio_vsock_connection* conn) {
+static void cleanup_connection(struct virtio_vsock_connection* conn) {
     while (conn->consumed_by_user != conn->prepared_for_user) {
         free(conn->packets_for_user[conn->consumed_by_user % VSOCK_MAX_PACKETS]);
         conn->consumed_by_user++;
     }
-    init_connection(conn);
+    if (conn->host_port)
+        host_port_delete(conn);
+}
+
+static void reinit_connection(struct virtio_vsock_connection* conn) {
+    cleanup_connection(conn);
+    init_connection(conn, /*host_port=*/0, /*guest_port=*/0, VIRTIO_VSOCK_CLOSE);
+}
+
+static struct virtio_vsock_connection* create_connection(uint64_t host_port, uint64_t guest_port,
+                                                         enum virtio_vsock_state state) {
+    struct virtio_vsock_connection* conn = malloc(sizeof(*conn));
+    if (!conn)
+        return NULL;
+
+    init_connection(conn, host_port, guest_port, state);
+    if (attach_connection(conn) < 0) {
+        free(conn);
+        return NULL;
+    }
+    if (host_port)
+        host_port_add(conn);
+
+    return conn;
+}
+
+static void remove_connection(struct virtio_vsock_connection* conn) {
+    detach_connection(conn->fd);
+    cleanup_connection(conn);
+    free(conn);
 }
 
 static struct virtio_vsock_packet* generate_packet(struct virtio_vsock_connection* conn,
@@ -411,7 +528,6 @@ static int recv_rw_packet(struct virtio_vsock_connection* conn,
 /* takes ownership of the packet and frees it in the end */
 static int process_packet(struct virtio_vsock_packet* packet) {
     int ret;
-    struct virtio_vsock_connection* conn = NULL;
 
     if (packet->header.size > VSOCK_MAX_PAYLOAD_SIZE) {
         log_error("malicious size of packet (%u)", packet->header.size);
@@ -438,20 +554,21 @@ static int process_packet(struct virtio_vsock_packet* packet) {
         return -PAL_ERROR_INVAL;
     }
 
-    for (int i = 0; i < VSOCK_MAX_CONNECTIONS; i++) {
-        /* guest and host CIDs are set in stone, so it is enough to distinguish connections based
-         * on the host's port (which is the `src_port` in the incoming packet) */
-        if (packet->header.src_port == g_vsock->conns[i].host_port) {
-            conn = &g_vsock->conns[i];
-            break;
-        }
-    }
+    struct virtio_vsock_connection* conn = NULL;
+
+    /* guest and host CIDs are set in stone, so it is enough to distinguish connections based on the
+     * host's port (which is the `src_port` in the incoming packet) */
+    uint64_t host_port = packet->header.src_port;
+    host_port_find(host_port, &conn);
 
     if (!conn && packet->header.op == VIRTIO_VSOCK_OP_REQUEST) {
-        for (size_t i = 0; i < VSOCK_MAX_CONNECTIONS; i++) {
-            if (g_vsock->conns[i].state == VIRTIO_VSOCK_LISTEN &&
-                    packet->header.dst_port == g_vsock->conns[i].guest_port) {
-                conn = &g_vsock->conns[i];
+        /* loop through all connections, trying to find a listening conn on this port; this is a
+         * slow O(n) implementation but such ops should be rare */
+        for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
+            struct virtio_vsock_connection* check_conn = g_vsock->conns[i];
+            if (check_conn && check_conn->state == VIRTIO_VSOCK_LISTEN
+                    && check_conn->guest_port == packet->header.dst_port) {
+                conn = check_conn;
                 break;
             }
         }
@@ -471,44 +588,36 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                 neglect_packet_and_free(packet);
                 return -PAL_ERROR_DENIED;
             }
-            if (conn->pending_conn != VSOCK_MAX_CONNECTIONS) {
+            if (conn->pending_conn_fd != UINT32_MAX) {
                 /* there is already one pending connection on this listening socket */
                 log_warning("vsock backlog full, dropping connection");
                 neglect_packet_and_free(packet);
                 return -PAL_ERROR_NOMEM;
             }
             /* create new connection */
-            struct virtio_vsock_connection* new_conn = NULL;
-            int i;
-            for (i = 0; i < VSOCK_MAX_CONNECTIONS; i++) {
-                if (g_vsock->conns[i].state == VIRTIO_VSOCK_CLOSE) {
-                    new_conn = &g_vsock->conns[i];
-                    break;
-                }
-            }
+            struct virtio_vsock_connection* new_conn = create_connection(packet->header.src_port,
+                                                                         pick_new_port(),
+                                                                         VIRTIO_VSOCK_ESTABLISHED);
             if (!new_conn) {
-                log_warning("no free vsock FDs for new connection");
+                log_error("no memory for new connection");
                 neglect_packet_and_free(packet);
                 return -PAL_ERROR_NOMEM;
             }
-            new_conn->state      = VIRTIO_VSOCK_ESTABLISHED;
-            new_conn->host_port  = packet->header.src_port;
-            new_conn->guest_port = pick_new_port();
             ret = send_response_packet(new_conn);
             if (ret < 0) {
                 neglect_packet_and_free(packet);
-                reinit_connection(new_conn);
+                remove_connection(new_conn);
                 return ret;
             }
             /* unblock accept() syscall */
-            conn->pending_conn = i;
+            conn->pending_conn_fd = new_conn->fd;
             free(packet);
             return 0;
 
         case VIRTIO_VSOCK_CONNECT:
             if (packet->header.op == VIRTIO_VSOCK_OP_RST) {
                 free(packet);
-                reinit_connection(conn);
+                remove_connection(conn);
                 return 0;
             }
             if (packet->header.op != VIRTIO_VSOCK_OP_RESPONSE) {
@@ -537,8 +646,8 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                     /* fallthrough */
                 case VIRTIO_VSOCK_OP_RST:
                     free(packet);
-                    reinit_connection(conn);
-					return 0;
+                    remove_connection(conn);
+                    return 0;
                 default:
                     /* unknown operation */
                     neglect_packet_and_free(packet);
@@ -690,6 +799,13 @@ int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_conf
     if (ret < 0)
         return ret;
 
+    size_t conns_size = VIRTIO_VSOCK_CONNS_INIT_SIZE;
+    struct virtio_vsock_connection** conns = calloc(conns_size, sizeof(*conns));
+    if (!conns) {
+        ret = -PAL_ERROR_NOMEM;
+        goto fail;
+    }
+
     vsock->pci_regs = pci_regs;
     vsock->pci_config = pci_config;
     vsock->interrupt_status_reg = interrupt_status_reg;
@@ -700,7 +816,6 @@ int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_conf
 
     status = vm_mmio_readb(&pci_regs->device_status);
     vm_mmio_writeb(&pci_regs->device_status, status | VIRTIO_STATUS_FEATURES_OK);
-
 
     status = vm_mmio_readb(&pci_regs->device_status);
     if (!(status & VIRTIO_STATUS_FEATURES_OK)) {
@@ -756,18 +871,21 @@ int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_conf
         goto fail;
     }
 
-    for (size_t i = 0; i < VSOCK_MAX_CONNECTIONS; i++)
-        init_connection(&g_vsock->conns[i]);
-
     vsock->host_cid  = VSOCK_HOST_CID;
     vsock->tx_cnt    = 0;
     vsock->fwd_cnt   = 0;
     vsock->buf_alloc = VSOCK_MAX_PACKETS * sizeof(struct virtio_vsock_packet);
 
+    vsock->conns_size  = conns_size;
+    vsock->conns       = conns;
+
+    vsock->conns_by_host_port = NULL;
+
     g_vsock = vsock;
     return 0;
 
 fail:
+    free(conns);
     virtio_vsock_free(vsock);
     status = vm_mmio_readb(&pci_regs->device_status);
     vm_mmio_writeb(&pci_regs->device_status, status | VIRTIO_STATUS_FAILED);
@@ -784,30 +902,27 @@ int virtio_vsock_socket(int domain, int type, int protocol) {
     if (protocol != 0)
         return -PAL_ERROR_NOTSUPPORT;
 
-    struct virtio_vsock_connection* conn = NULL;
-    int i;
-    for (i = 0; i < VSOCK_MAX_CONNECTIONS; i++) {
-        if (g_vsock->conns[i].state == VIRTIO_VSOCK_CLOSE) {
-            conn = &g_vsock->conns[i];
-            break;
-        }
+    struct virtio_vsock_connection* conn = create_connection(/*host_port=*/0, /*guest_port=*/0,
+                                                             VIRTIO_VSOCK_CLOSE);
+    if (!conn) {
+        log_error("no memory for new connection");
+        return -PAL_ERROR_NOMEM;
     }
 
-    if (!conn)
-        return -PAL_ERROR_DENIED;
-
-    reinit_connection(conn);
-    return i;
+    return conn->fd;
 }
 
 int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* out_new_port) {
     if (!addr || addrlen < sizeof(struct sockaddr_vm))
         return -PAL_ERROR_INVAL;
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state != VIRTIO_VSOCK_CLOSE || conn->guest_port != 0)
         return -PAL_ERROR_INVAL;
 
@@ -819,10 +934,11 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
     if (bind_to_port == 0) {
         bind_to_port = pick_new_port();
     } else {
-        for (int i = 0; i < VSOCK_MAX_CONNECTIONS; i++) {
-            if (i == sockfd || g_vsock->conns[i].state == VIRTIO_VSOCK_CLOSE)
-                continue;
-            if (g_vsock->conns[i].guest_port == bind_to_port)
+        /* loop through all connections, checking whether the port-to-bind is already occupied; this
+         * is a slow O(n) implementation but such ops should be rare */
+        for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
+            struct virtio_vsock_connection* check_conn = g_vsock->conns[i];
+            if (check_conn && check_conn->guest_port == bind_to_port)
                 return -PAL_ERROR_STREAMEXIST;
         }
     }
@@ -838,10 +954,13 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
 int virtio_vsock_listen(int sockfd, int backlog) {
     __UNUSED(backlog);
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state != VIRTIO_VSOCK_CLOSE)
         return -PAL_ERROR_STREAMEXIST;
 
@@ -849,7 +968,7 @@ int virtio_vsock_listen(int sockfd, int backlog) {
         return -PAL_ERROR_STREAMNOTEXIST;
 
     conn->state = VIRTIO_VSOCK_LISTEN;
-    conn->pending_conn = VSOCK_MAX_CONNECTIONS;
+    conn->pending_conn_fd = UINT32_MAX;
     return 0;
 }
 
@@ -857,42 +976,51 @@ int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen) {
     if (!addr || !addrlen || *addrlen < sizeof(struct sockaddr_vm))
         return -PAL_ERROR_INVAL;
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state != VIRTIO_VSOCK_LISTEN)
         return -PAL_ERROR_INVAL;
 
-    if (conn->pending_conn == VSOCK_MAX_CONNECTIONS) {
+    if (conn->pending_conn_fd == UINT32_MAX) {
         /* non-blocking caller must return TRYAGAIN; blocking caller must sleep on this */
         return -PAL_ERROR_TRYAGAIN;
     }
 
-    uint32_t accepted_conn = conn->pending_conn;
+    uint32_t accepted_conn_fd = conn->pending_conn_fd;
+    struct virtio_vsock_connection* accepted_conn = get_connection(accepted_conn_fd);
+    if (!accepted_conn)
+        return -PAL_ERROR_DENIED;
 
     *addrlen = sizeof(struct sockaddr_vm);
     struct sockaddr_vm* addr_vm = (struct sockaddr_vm*)addr;
     addr_vm->svm_family = AF_VSOCK;
     addr_vm->svm_reserved1 = 0;
     addr_vm->svm_cid = g_vsock->host_cid;
-    addr_vm->svm_port = g_vsock->conns[accepted_conn].host_port;
+    addr_vm->svm_port = accepted_conn->host_port;
 
-    conn->pending_conn = VSOCK_MAX_CONNECTIONS;
-    return accepted_conn;
+    conn->pending_conn_fd = UINT32_MAX;
+    return accepted_conn_fd;
 }
 
 int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t timeout_us) {
     if (!addr || addrlen < sizeof(struct sockaddr_vm))
         return -PAL_ERROR_INVAL;
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
     if (timeout_us == 0)
         return -PAL_ERROR_INVAL;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state != VIRTIO_VSOCK_CLOSE)
         return -PAL_ERROR_STREAMEXIST;
 
@@ -911,8 +1039,10 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
     if (ret < 0)
         return ret;
 
+    assert(conn->host_port == 0 && conn->guest_port == 0);
     conn->host_port  = addr_vm->svm_port;
     conn->guest_port = pick_new_port();
+    host_port_add(conn);
 
     ret = send_request_packet(conn);
     if (ret < 0)
@@ -960,10 +1090,13 @@ int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen) {
     if (!addr || !addrlen || *addrlen < sizeof(struct sockaddr_vm))
         return -PAL_ERROR_INVAL;
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state == VIRTIO_VSOCK_CLOSE)
         return -PAL_ERROR_BADHANDLE;
 
@@ -977,13 +1110,15 @@ int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen) {
 }
 
 long virtio_vsock_peek(int sockfd) {
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
 
     if (conn->state == VIRTIO_VSOCK_LISTEN) {
-        return conn->pending_conn == VSOCK_MAX_CONNECTIONS ? 0 : 1;
+        return conn->pending_conn_fd == UINT32_MAX ? 0 : 1;
     } else if (conn->state == VIRTIO_VSOCK_ESTABLISHED) {
         size_t peeked = 0;
         uint32_t peek_at = conn->consumed_by_user;
@@ -1001,10 +1136,13 @@ long virtio_vsock_read(int sockfd, void* buf, size_t count) {
     if (!buf)
         return -PAL_ERROR_BADADDR;
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state != VIRTIO_VSOCK_ESTABLISHED)
         return -PAL_ERROR_INVAL;
 
@@ -1050,10 +1188,13 @@ long virtio_vsock_write(int sockfd, const void* buf, size_t count) {
     if (!buf)
         return -PAL_ERROR_BADADDR;
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
     if (conn->state != VIRTIO_VSOCK_ESTABLISHED)
         return -PAL_ERROR_INVAL;
 
@@ -1085,7 +1226,7 @@ long virtio_vsock_write(int sockfd, const void* buf, size_t count) {
 int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
     __UNUSED(how);
 
-    if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
+    if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
 
     if (timeout_us == 0)
@@ -1094,7 +1235,9 @@ int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
     int ret;
     uint64_t timeout_absolute_us = 0;
     void* timeout = NULL;
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
 
     if (conn->state == VIRTIO_VSOCK_CLOSE)
         return 0;
@@ -1147,12 +1290,19 @@ int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
 out:
     if (timeout)
         deregister_timeout(timeout);
-
     reinit_connection(conn);
-
     return ret;
 }
 
 int virtio_vsock_close(int sockfd, uint64_t timeout_us) {
-    return virtio_vsock_shutdown(sockfd, VIRTIO_VSOCK_SHUTDOWN_COMPLETE, timeout_us);
+    if (sockfd < 0)
+        return -PAL_ERROR_BADHANDLE;
+
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn)
+        return -PAL_ERROR_BADHANDLE;
+
+    int ret = virtio_vsock_shutdown(sockfd, VIRTIO_VSOCK_SHUTDOWN_COMPLETE, timeout_us);
+    remove_connection(conn);
+    return ret;
 }

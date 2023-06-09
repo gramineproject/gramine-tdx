@@ -7,13 +7,18 @@
 
 #include <stdint.h>
 
+#include "pal_internal.h"
 #include "spinlock.h"
+#include "uthash.h"
 
 #define AF_VSOCK 40
 
-#define VSOCK_HOST_CID 2
-#define VSOCK_MAX_CONNECTIONS 10
-#define VSOCK_MAX_PACKETS     32 /* circular buffer, so must be a power of 2 */
+#define VSOCK_HOST_CID        2
+#define VSOCK_MAX_PACKETS     32   /* circular buffer, so must be a power of 2 */
+#define VSOCK_STARTING_PORT   1000 /* start port numbering from 1000, for no particular reason */
+
+/* initial size of g_vsock->conns array */
+#define VIRTIO_VSOCK_CONNS_INIT_SIZE 4
 
 /* for simplicity, each packet has statically allocated buffer for recv/send data */
 #define VSOCK_MAX_PAYLOAD_SIZE 16U /* FIXME: this small size is for testing, actually want ~4K */
@@ -90,10 +95,12 @@ struct virtio_vsock_packet {
 };
 
 struct virtio_vsock_connection {
+    uint32_t fd; /* equals to UINT32_MAX if not attached to any fd */
+
     enum virtio_vsock_state state;
     uint64_t host_port;
     uint64_t guest_port;
-    uint32_t pending_conn; /* only for LISTENING state, = VSOCK_MAX_CONNECTIONS if no pending */
+    uint32_t pending_conn_fd; /* only for LISTENING state, equals to UINT32_MAX if no pending */
 
     struct virtio_vsock_packet* packets_for_user[VSOCK_MAX_PACKETS];
     uint32_t prepared_for_user;
@@ -101,6 +108,8 @@ struct virtio_vsock_connection {
 
     spinlock_t state_lock;
     int state_futex;
+
+    UT_hash_handle hh_host_port;
 };
 
 struct sockaddr_vm {
