@@ -227,8 +227,6 @@ struct virtio_fs {
     bool device_done;               /* set on IRQ when device is ready with FUSE request */
 
     bool initialized;
-    uint32_t host_fuse_ver_major;
-    uint32_t host_fuse_ver_minor;
 
     /* statically allocated in shared memory, accesses via vm_shared_writex() */
     char* shared_buf;           /* internal buf where FUSE requests/responses are copied to */
@@ -243,6 +241,7 @@ struct virtio_fs {
 };
 
 int virtio_fs_fuse_init(void);
+
 int virtio_fs_fuse_lookup(const char* filename, uint64_t* out_nodeid);
 int virtio_fs_fuse_readlink(uint64_t nodeid, uint64_t size, char* out_buf, uint64_t* out_size);
 
@@ -260,7 +259,7 @@ int virtio_fs_fuse_write(uint64_t nodeid, uint64_t fh, const char* buf, uint64_t
                          uint64_t offset, uint64_t* out_size);
 int virtio_fs_fuse_flush(uint64_t nodeid, uint64_t fh);
 
-int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags,
+int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags, uint64_t max_size,
                            struct fuse_attr* out_attr);
 int virtio_fs_fuse_setattr(uint64_t nodeid, const struct fuse_setattr_in* setattr);
 

@@ -117,6 +117,7 @@ int pal_common_file_open(struct pal_handle** handle, const char* type, const cha
     struct pal_handle* hdl = NULL;
     char* uri_with_slash = NULL;
     char* norm_path = NULL;
+    char* parent_resolved_path = NULL;
     char* resolved_path = NULL;
 
     /* for cleanup in case the file was created and there is a failure */
@@ -155,12 +156,12 @@ int pal_common_file_open(struct pal_handle** handle, const char* type, const cha
         if (ret < 0)
             goto out;
 
-        ret = realpath(dir_path, /*got_path=*/NULL, &resolved_path);
+        ret = realpath(dir_path, /*got_path=*/NULL, &parent_resolved_path);
         if (ret < 0)
             goto out;
 
         uint64_t dir_nodeid;
-        ret = virtio_fs_fuse_lookup(resolved_path, &dir_nodeid);
+        ret = virtio_fs_fuse_lookup(parent_resolved_path, &dir_nodeid);
         if (ret < 0)
             goto out;
 
@@ -243,7 +244,8 @@ int pal_common_file_open(struct pal_handle** handle, const char* type, const cha
     if (tf) {
         /* now we can learn the size of the trusted file */
         struct fuse_attr attr;
-        ret = virtio_fs_fuse_getattr(hdl->file.nodeid, hdl->file.fh, FUSE_GETATTR_FH, &attr);
+        ret = virtio_fs_fuse_getattr(hdl->file.nodeid, hdl->file.fh, FUSE_GETATTR_FH, UINT64_MAX,
+                                     &attr);
         if (ret < 0)
             goto out;
         tf->size = attr.size;
@@ -261,6 +263,7 @@ int pal_common_file_open(struct pal_handle** handle, const char* type, const cha
     ret = 0;
 out:
     free(uri_with_slash);
+    free(parent_resolved_path);
     free(resolved_path);
     if (ret < 0) {
         free(norm_path);
@@ -281,7 +284,7 @@ int64_t pal_common_file_read(struct pal_handle* handle, uint64_t offset, uint64_
     if (!handle->file.chunk_hashes) {
         /* case of passthrough/allowed file */
         uint64_t read_size;
-        ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh, MIN(count, FILECHUNK_MAX),
+        ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh, MIN(count, FILE_CHUNK_SIZE),
                                   offset, buffer, &read_size);
         if (ret < 0)
             return ret;
@@ -316,13 +319,13 @@ int64_t pal_common_file_write(struct pal_handle* handle, uint64_t offset, uint64
     }
 
     /* try to write the whole buffer (this is important for some workloads like Python3); do it in
-     * FILECHUNK_MAX chunks because virtio-fs cannot consume more than this limit at a time */
+     * FILE_CHUNK_SIZE chunks because virtio-fs cannot consume more than this limit at a time */
     uint64_t total_written_size = 0;
     while (total_written_size < count) {
         uint64_t written_size;
         int ret = virtio_fs_fuse_write(handle->file.nodeid, handle->file.fh,
                                        buffer + total_written_size,
-                                       MIN(count - total_written_size, FILECHUNK_MAX),
+                                       MIN(count - total_written_size, FILE_CHUNK_SIZE),
                                        offset + total_written_size, &written_size);
         if (ret < 0)
             return total_written_size ? (int64_t)total_written_size : ret;
@@ -377,9 +380,9 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
     size_t bytes_filled;
 
     if ((int64_t)offset >= end) {
-        /* file is mmapped at offset beyond file size, there are no trusted-file contents to
-         * back mmapped enclave pages; this is a legit case, so simply zero out these enclave
-         * pages and return success */
+        /* file is mmapped at offset beyond file size, there are no trusted-file contents to back
+         * mmapped enclave pages; this is a legit case, so simply zero out these enclave pages and
+         * return success */
         bytes_filled = 0;
     } else {
         int64_t aligned_offset = ALIGN_DOWN(offset, TRUSTED_CHUNK_SIZE);
@@ -418,7 +421,8 @@ int pal_common_file_attrquerybyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* p
     int ret;
 
     struct fuse_attr attr;
-    ret = virtio_fs_fuse_getattr(handle->file.nodeid, handle->file.fh, FUSE_GETATTR_FH, &attr);
+    ret = virtio_fs_fuse_getattr(handle->file.nodeid, handle->file.fh, FUSE_GETATTR_FH, UINT64_MAX,
+                                 &attr);
     if (ret < 0)
         return ret;
 
@@ -518,9 +522,13 @@ int pal_common_dir_open(struct pal_handle** handle, const char* type, const char
     bool opened = false;
     struct pal_handle* hdl = NULL;
     char* uri_with_slash = NULL;
-    char* path = NULL;
+    char* norm_path = NULL;
     char* parent_resolved_path = NULL;
     char* resolved_path = NULL;
+
+    /* for cleanup in case the dir was created and there is a failure */
+    uint64_t created_dir_nodeid = 0;
+    char* created_base_path = NULL;
 
     if (strcmp(type, URI_TYPE_DIR))
         return -PAL_ERROR_INVAL;
@@ -564,6 +572,9 @@ int pal_common_dir_open(struct pal_handle** handle, const char* type, const char
         ret = virtio_fs_fuse_mkdir(parent_dir_nodeid, base_path, share, &nodeid);
         if (ret < 0)
             goto out;
+
+        created_dir_nodeid = parent_dir_nodeid;
+        created_base_path = strdup(base_path);
     } else {
         /* dir exists (and was already resolved), simply look it up */
         ret = virtio_fs_fuse_lookup(resolved_path, &nodeid);
@@ -584,9 +595,15 @@ int pal_common_dir_open(struct pal_handle** handle, const char* type, const char
         goto out;
     }
 
-    path = strdup(uri);
-    if (!path) {
+    size_t norm_path_size = strlen(uri) + 1;
+    norm_path = malloc(norm_path_size);
+    if (!norm_path) {
         ret = -PAL_ERROR_NOMEM;
+        goto out;
+    }
+
+    if (!get_norm_path(uri, norm_path, &norm_path_size)) {
+        ret = -PAL_ERROR_INVAL;
         goto out;
     }
 
@@ -595,7 +612,7 @@ int pal_common_dir_open(struct pal_handle** handle, const char* type, const char
 
     hdl->dir.nodeid   = nodeid;
     hdl->dir.fh       = fh;
-    hdl->dir.realpath = path;
+    hdl->dir.realpath = norm_path;
 
     hdl->dir.buf         = NULL;
     hdl->dir.ptr         = NULL;
@@ -609,14 +626,14 @@ out:
     free(parent_resolved_path);
     free(resolved_path);
     if (ret < 0) {
-        free(path);
+        free(norm_path);
         free(hdl);
-        if (opened) {
-            int close_ret = virtio_fs_fuse_releasedir(nodeid, fh);
-            if (ret == 0)
-                ret = close_ret;
-        }
+        if (opened)
+            virtio_fs_fuse_releasedir(nodeid, fh);
+        if (created_dir_nodeid && created_base_path)
+            virtio_fs_fuse_rmdir(created_dir_nodeid, created_base_path);
     }
+    free(created_base_path);
     return ret;
 }
 
@@ -627,37 +644,30 @@ int64_t pal_common_dir_read(struct pal_handle* handle, uint64_t offset, size_t c
 
     uint64_t last_fuse_dirent_off = 0;
 
-    if (offset) {
+    if (offset)
         return -PAL_ERROR_INVAL;
-    }
 
-    if (handle->dir.endofstream) {
+    if (handle->dir.endofstream)
         return 0;
-    }
 
     while (1) {
         while ((char*)handle->dir.ptr < (char*)handle->dir.end) {
             struct fuse_dirent* dirent = (struct fuse_dirent*)handle->dir.ptr;
 
-            if (is_dot_or_dotdot(dirent->name)) {
+            if (is_dot_or_dotdot(dirent->name))
                 goto skip;
-            }
 
             bool is_dir = dirent->type == DT_DIR;
             size_t len = dirent->namelen;
-            if ((ssize_t)len >= (char*)handle->dir.end - (char*)handle->dir.ptr) {
+            if ((ssize_t)len >= (char*)handle->dir.end - (char*)handle->dir.ptr)
                 return -PAL_ERROR_DENIED;
-            }
 
-
-            if (len + 1 + (is_dir ? 1 : 0) > count) {
+            if (len + 1 + (is_dir ? 1 : 0) > count)
                 goto out;
-            }
 
             memcpy(buf, dirent->name, len);
-            if (is_dir) {
+            if (is_dir)
                 buf[len++] = '/';
-            }
             buf[len++] = '\0';
 
             buf += len;
@@ -679,9 +689,8 @@ int64_t pal_common_dir_read(struct pal_handle* handle, uint64_t offset, size_t c
 
         if (!handle->dir.buf) {
             handle->dir.buf = malloc(DIRBUF_SIZE);
-            if (!handle->dir.buf) {
+            if (!handle->dir.buf)
                 return -PAL_ERROR_NOMEM;
-            }
         }
 
         uint64_t size;
@@ -691,7 +700,7 @@ int64_t pal_common_dir_read(struct pal_handle* handle, uint64_t offset, size_t c
             if (bytes_written) {
                 /* If something was written just return that and pretend no error was seen - it will
                  * be caught next time. */
-                return bytes_written;
+                goto out;
             }
             return ret;
         }

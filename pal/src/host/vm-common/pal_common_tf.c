@@ -34,7 +34,7 @@ static int read_whole_buf(struct pal_handle* handle, void* buf, uint64_t size, u
     while (bytes_read < size) {
         uint64_t read_size;
         int ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh,
-                                      MIN(size - bytes_read, FILECHUNK_MAX), bytes_read + offset,
+                                      MIN(size - bytes_read, FILE_CHUNK_SIZE), bytes_read + offset,
                                       buf + bytes_read, &read_size);
         if (ret < 0) {
             if (ret == -PAL_ERROR_INTERRUPTED)

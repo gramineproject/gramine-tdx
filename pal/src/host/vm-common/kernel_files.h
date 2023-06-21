@@ -9,7 +9,7 @@
 
 /* underlying virtio-fs driver operates only on limited amount of data (VIRTIO_FS_SHARED_BUF_SIZE),
  * so file-related functions must not exceed this limit when calling into the driver */
-#define FILECHUNK_MAX (16 * 1024UL)
+#define FILE_CHUNK_SIZE (16 * 1024UL)
 
 #define PATH_MAX      512
 #define MAX_READLINKS 32
