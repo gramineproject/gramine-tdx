@@ -7,6 +7,7 @@
  * See `man 4 fuse` for descriptions of used FUSE messages. We currently implement the following:
  *
  *   - FUSE_INIT     -- very first message, negotiates the protocol between guest (us) and host
+ *
  *   - FUSE_LOOKUP   -- find file based on filename on the host and return its nodeid
  *   - FUSE_READLINK -- resolve symbolic link of nodeid and put it into out_buf
  *
@@ -36,6 +37,7 @@
 #include "api.h"
 #include "pal_error.h"
 #include "pal_linux_error.h"
+#include "stat.h"
 
 #include "external/fuse_kernel.h"
 
@@ -79,7 +81,7 @@ int virtio_fs_isr(void) {
         if (host_used_idx != expected_used_idx)
             goto out;
 
-        /* it is an actual change in "used" ring (not a spurious one), memorize it and kick the
+        /* it is an actual change in "used" ring (not a spurious one), memoize it and kick the
          * waiting thread that issued the request */
         g_fs->requests->seen_used = host_used_idx;
         g_fs->device_done = true;
@@ -99,10 +101,8 @@ out:
 static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
     int ret;
 
-    if (count < 3) {
-        /* no FUSE request has less that 3 descriptors (at least fuse_in, data_in, fuse_out) */
-        return -PAL_ERROR_INVAL;
-    }
+    /* no FUSE request has less that 3 descriptors (at least fuse_in, data_in, fuse_out) */
+    assert(count >= 3);
 
     if (g_fs->device_done) {
         /* sanity check: must not happen because we are single-core and interrupt routines never
@@ -167,8 +167,10 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
 
 	vm_mmio_writew(g_fs->requests_notify_addr, /*queue_sel=*/1);
 
-    while (__atomic_load_n(&g_fs->device_done, __ATOMIC_RELAXED) != true)
+    while (__atomic_load_n(&g_fs->device_done, __ATOMIC_RELAXED) != true) {
+        /* FIXME: simply spinning until the VMM processes the request; maybe we could use MWAIT? */
         CPU_RELAX();
+    }
 
     shared_buf_addr = g_fs->shared_buf;
     for (size_t i = 0; i < count; i++) {
@@ -191,8 +193,7 @@ out:
 int virtio_fs_fuse_init(void) {
     int ret;
 
-    if (g_fs->initialized)
-        return 0;
+    assert(!g_fs->initialized);
 
     struct fuse_in_header  hdr_in   = { .opcode = FUSE_INIT };
     struct fuse_init_in    init_in  = { .major = FUSE_KERNEL_VERSION,
@@ -223,10 +224,7 @@ int virtio_fs_fuse_init(void) {
         return -PAL_ERROR_DENIED;
     }
 
-    /* TODO: check other fields, also make sure we pin to a specific minor version */
-    g_fs->host_fuse_ver_major = init_out.major;
-    g_fs->host_fuse_ver_minor = init_out.minor;
-
+    /* NOTE: no fields in `fuse_init_out` (like `max_readahead`, `flags`) seem to be interesting */
     g_fs->initialized = true;
     return 0;
 }
@@ -263,7 +261,15 @@ int virtio_fs_fuse_lookup(const char* filename, uint64_t* out_nodeid) {
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
-    /* TODO: take into account `generation` and optionally parse/memorize returned attrs */
+    /*
+     * NOTES:
+     * - We don't take into account `generation`, even though the docs imply that `nodeid` by itself
+     *   is not sufficiently unique to identify the current file; but I haven't seen any issues yet
+     *   (`generation` seems to be relevant only for network FSes which we don't use).
+     * - We don't take into account cache timeouts -- Gramine-TDX never caches file data/metadata.
+     * - We don't memoize `attr` (which is an optimization to not call a separate FUSE_GETATTR op).
+     *   Gramine-TDX always calls a separate FUSE_GETATTR when it needs to learn file attributes.
+     */
     *out_nodeid = entry_out.nodeid;
     return 0;
 }
@@ -277,26 +283,38 @@ int virtio_fs_fuse_readlink(uint64_t nodeid, uint64_t size, char* out_buf, uint6
     struct fuse_in_header  hdr_in  = { .opcode = FUSE_READLINK, .nodeid = nodeid };
     struct fuse_out_header hdr_out = {0};
 
+    /* for security and not to modify `out_buf` in case of errors, introduce a bounce buffer */
+    char* bounce_buf = malloc(size);
+    if (!bounce_buf)
+        return -PAL_ERROR_NOMEM;
+
     struct virtio_fs_desc descs[] = {
-        { .addr = &hdr_in,  .size = sizeof(hdr_in),  .in = true },
-        { .addr = &hdr_out, .size = sizeof(hdr_out), .in = false },
-        { .addr = out_buf,  .size = size,            .in = false },
+        { .addr = &hdr_in,    .size = sizeof(hdr_in),  .in = true },
+        { .addr = &hdr_out,   .size = sizeof(hdr_out), .in = false },
+        { .addr = bounce_buf, .size = size,            .in = false },
     };
 
     ret = virtio_fs_exec_request(/*count=*/3, descs);
     if (ret < 0)
-        return ret;
-    if (hdr_out.error < 0)
-        return unix_to_pal_error(hdr_out.error);
+        goto out;
+    if (hdr_out.error < 0) {
+        ret = unix_to_pal_error(hdr_out.error);
+        goto out;
+    }
 
-    /* verify possibly-malicious `hdr_out.len` */
-    if (hdr_out.len < sizeof(hdr_out) || hdr_out.len > sizeof(hdr_out) + size)
-        return -PAL_ERROR_DENIED;
+    /* verify possibly-malicious `hdr_out.len` (recall that `hdr_out->len` returns the *total* size
+     * of the host's reply, including the header) */
+    if (hdr_out.len < sizeof(hdr_out) || hdr_out.len > sizeof(hdr_out) + size) {
+        ret = -PAL_ERROR_DENIED;
+        goto out;
+    }
 
-    /* out_buf was already populated by the above call, let's populate out_size (recall that
-     * `hdr_out->len` returns the *total* size of the host's reply, including the header) */
+    memcpy(out_buf, bounce_buf, hdr_out.len - sizeof(hdr_out));
     *out_size = hdr_out.len - sizeof(hdr_out);
-    return 0;
+    ret = 0;
+out:
+    free(bounce_buf);
+    return ret;
 }
 
 int virtio_fs_fuse_open(uint64_t nodeid, uint32_t flags, uint64_t* out_fh) {
@@ -323,7 +341,16 @@ int virtio_fs_fuse_open(uint64_t nodeid, uint32_t flags, uint64_t* out_fh) {
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
-    /* TODO: take into account `open_flags` */
+    /*
+     * Notes on currently unused `open_flags`:
+     * - FOPEN_DIRECT_IO is pointless because we don't have FS page cache.
+     * - FOPEN_KEEP_CACHE is pointless because we don't have FS data cache.
+     * - FOPEN_NONSEEKABLE *may be useful* when we work not only with regular files, but with e.g.
+     *   FIFOs on the host.
+     * - FOPEN_CACHE_DIR is pointless because we don't have FS dir cache.
+     * - FOPEN_STREAM is the same as FOPEN_NONSEEKABLE, so most probably not needed even when we
+     *   implement FOPEN_NONSEEKABLE.
+     */
     *out_fh = open_out.fh;
     return 0;
 }
@@ -357,10 +384,10 @@ int virtio_fs_fuse_create(uint64_t dir_nodeid, const char* filename, uint32_t fl
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
-    /* TODO: take into account `generation` and optionally parse/memorize returned attrs */
+    /* see comments on `fuse_entry_out` fields in virtio_fs_fuse_lookup() */
     *out_nodeid = entry_out.nodeid;
 
-    /* TODO: take into account `open_flags` */
+    /* see comments on `fuse_open_out` fields in virtio_fs_fuse_open() */
     *out_fh = open_out.fh;
     return 0;
 }
@@ -371,8 +398,15 @@ int virtio_fs_fuse_release(uint64_t nodeid, uint64_t fh) {
     if (!g_fs->initialized)
         return -PAL_ERROR_DENIED;
 
+    /*
+     * Notes on `fuse_release_in` flags:
+     * - FUSE_RELEASE_FLUSH is not needed because Gramine performs explicit flush before close where
+     *   required (also the app + libc explicitly flush on closing files).
+     * - FUSE_RELEASE_FLOCK_UNLOCK is not needed because Gramine emulates file locking in LibOS and
+     *   doesn't require any support on the host side.
+     */
     struct fuse_in_header  hdr_in      = { .opcode = FUSE_RELEASE, .nodeid = nodeid };
-    struct fuse_release_in release_in  = { .fh = fh }; /* TODO: use `flags`? */
+    struct fuse_release_in release_in  = { .fh = fh };
     struct fuse_out_header hdr_out     = {0};
 
     struct virtio_fs_desc descs[] = {
@@ -402,7 +436,7 @@ int virtio_fs_fuse_unlink(uint64_t dir_nodeid, const char* filename) {
     struct virtio_fs_desc descs[] = {
         { .addr = &hdr_in,         .size = sizeof(hdr_in),       .in = true },
         { .addr = (void*)filename, .size = strlen(filename) + 1, .in = true },
-        { .addr = &hdr_out,  .size = sizeof(hdr_out),            .in = false },
+        { .addr = &hdr_out,        .size = sizeof(hdr_out),      .in = false },
     };
 
     ret = virtio_fs_exec_request(/*count=*/3, descs);
@@ -463,18 +497,27 @@ int virtio_fs_fuse_read(uint64_t nodeid, uint64_t fh, uint64_t size, uint64_t of
 
     ret = virtio_fs_exec_request(/*count=*/4, descs);
     if (ret < 0)
-        return ret;
-    if (hdr_out.error < 0)
-        return unix_to_pal_error(hdr_out.error);
+        goto fail;
+    if (hdr_out.error < 0) {
+        ret = unix_to_pal_error(hdr_out.error);
+        goto fail;
+    }
 
-    /* verify possibly-malicious `hdr_out.len` */
-    if (hdr_out.len < sizeof(hdr_out) || hdr_out.len > sizeof(hdr_out) + size)
-        return -PAL_ERROR_DENIED;
+    /* verify possibly-malicious `hdr_out.len` (recall that `hdr_out->len` returns the *total* size
+     * of the host's reply, including the header) */
+    if (hdr_out.len < sizeof(hdr_out) || hdr_out.len > sizeof(hdr_out) + size) {
+        ret = -PAL_ERROR_DENIED;
+        goto fail;
+    }
 
-    /* out_buf was already populated by the above call, let's populate out_size (recall that
-     * `hdr_out->len` returns the *total* size of the host's reply, including the header) */
+    /* out_buf was already populated during `virtio_fs_exec_request()` */
     *out_size = hdr_out.len - sizeof(hdr_out);
     return 0;
+fail:
+    /* erase out_buf, so that no malicious data is transmitted into private memory; this may worsen
+     * performance but the hope is that read failures don't happen often in benign cases */
+    memset(out_buf, 0, size);
+    return ret;
 }
 
 int virtio_fs_fuse_write(uint64_t nodeid, uint64_t fh, const char* buf, uint64_t size,
@@ -538,7 +581,7 @@ int virtio_fs_fuse_flush(uint64_t nodeid, uint64_t fh) {
 }
 
 /* `fh` may be dummy if `flags & FUSE_GETATTR_FH == false` (then `nodeid` is used) */
-int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags,
+int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags, uint64_t max_size,
                            struct fuse_attr* out_attr) {
     int ret;
 
@@ -563,8 +606,32 @@ int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags,
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
+    /* zero out unused fields, so that no malicious data is transmitted into private memory
+     * (the only currently used fields are `size` and `mode`) */
+	attr_out.attr.ino       = 0;
+	attr_out.attr.blocks    = 0;
+	attr_out.attr.atime     = 0;
+	attr_out.attr.mtime     = 0;
+	attr_out.attr.ctime     = 0;
+	attr_out.attr.atimensec = 0;
+	attr_out.attr.mtimensec = 0;
+	attr_out.attr.ctimensec = 0;
+	attr_out.attr.nlink     = 0;
+	attr_out.attr.uid       = 0;
+	attr_out.attr.gid       = 0;
+	attr_out.attr.rdev      = 0;
+	attr_out.attr.blksize   = 0;
+	attr_out.attr.padding   = 0;
+
+    /* verify queried file size against a caller-specified limit */
+    if (attr_out.attr.size > max_size)
+        return -PAL_ERROR_DENIED;
+
+    /* we currently support only regular files and dirs */
+    if (!S_ISREG(attr_out.attr.mode) && !S_ISDIR(attr_out.attr.mode))
+        return -PAL_ERROR_DENIED;
+
     /* NOTE: we don't cache file attrs and thus don't care about `attr_valid` fields */
-    /* FIXME: maybe verify & sanitize possibly-malicious `attr_out.attr` for TDX? */
     *out_attr = attr_out.attr;
     return 0;
 }
@@ -574,6 +641,11 @@ int virtio_fs_fuse_setattr(uint64_t nodeid, const struct fuse_setattr_in* setatt
 
     if (!g_fs->initialized)
         return -PAL_ERROR_DENIED;
+
+    /* the only currently used fields are `size` and `mode`, set on a file handle */
+    if (setattr->valid != (FATTR_FH | FATTR_SIZE)
+            && setattr->valid != (FATTR_FH | FATTR_MODE))
+        return -PAL_ERROR_INVAL;
 
     struct fuse_in_header  hdr_in     = { .opcode = FUSE_SETATTR, .nodeid = nodeid };
     struct fuse_setattr_in setattr_in = *setattr;
@@ -593,7 +665,7 @@ int virtio_fs_fuse_setattr(uint64_t nodeid, const struct fuse_setattr_in* setatt
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
-    /* TODO: return `attr_out` to caller? e.g., to update the PAL file handle attrs */
+    /* NOTE: we ignore `attr_out` (this is a FUSE optimization to set & get file attributes) */
     return 0;
 }
 
@@ -621,7 +693,7 @@ int virtio_fs_fuse_opendir(uint64_t nodeid, uint32_t flags, uint64_t* out_fh) {
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
-    /* TODO: take into account `open_flags` */
+    /* notes on currently unused `open_flags` are the same as in `virtio_fs_fuse_open()` */
     *out_fh = open_out.fh;
     return 0;
 }
@@ -652,7 +724,7 @@ int virtio_fs_fuse_mkdir(uint64_t dir_nodeid, const char* dirname, uint32_t mode
     if (hdr_out.error < 0)
         return unix_to_pal_error(hdr_out.error);
 
-    /* TODO: take into account `generation` and optionally parse/memorize returned attrs */
+    /* see comments on `fuse_entry_out` fields in virtio_fs_fuse_lookup() */
     *out_nodeid = entry_out.nodeid;
     return 0;
 }
@@ -727,18 +799,27 @@ int virtio_fs_fuse_readdir(uint64_t nodeid, uint64_t fh, uint64_t size, uint64_t
 
     ret = virtio_fs_exec_request(/*count=*/4, descs);
     if (ret < 0)
-        return ret;
-    if (hdr_out.error < 0)
-        return unix_to_pal_error(hdr_out.error);
+        goto fail;
+    if (hdr_out.error < 0) {
+        ret = unix_to_pal_error(hdr_out.error);
+        goto fail;
+    }
 
-    /* verify possibly-malicious `hdr_out.len` */
-    if (hdr_out.len < sizeof(hdr_out) || hdr_out.len > sizeof(hdr_out) + size)
-        return -PAL_ERROR_DENIED;
+    /* verify possibly-malicious `hdr_out.len` (recall that `hdr_out->len` returns the *total* size
+     * of the host's reply, including the header) */
+    if (hdr_out.len < sizeof(hdr_out) || hdr_out.len > sizeof(hdr_out) + size) {
+        ret = -PAL_ERROR_DENIED;
+        goto fail;
+    }
 
-    /* out_dirents was already populated by the above call, let's populate out_size (recall that
-     * `hdr_out->len` returns the *total* size of the host's reply, including the header) */
+    /* out_dirents was already populated during `virtio_fs_exec_request()` */
     *out_size = hdr_out.len - sizeof(hdr_out);
     return 0;
+fail:
+    /* erase out_dirents, so that no malicious data is transmitted into private memory; this may
+     * worsen performance but hope is that readdir failures don't happen often in benign cases */
+    memset(out_dirents, 0, size);
+    return ret;
 }
 
 static int virtio_fs_negotiate_features(struct virtio_fs* fs) {
