@@ -210,7 +210,9 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     if (ret < 0)
         INIT_FAIL("Failed to initialize physical memory");
 
-    ret = memory_pagetables_init(g_pal_public_state.memory_address_end);
+    /* TD-Shim already installed initial page tables that span [0..4GB) of RAM */
+    ret = memory_pagetables_init(g_pal_public_state.memory_address_end,
+                                 /*current_page_tables_cover_1gb=*/true);
     if (ret < 0)
         INIT_FAIL("Failed to initialize page tables");
 

@@ -20,10 +20,10 @@ PHDRS
 
 SECTIONS
 {
-  /* PAL kernel starts at address 0x180000 (1.5M) for no good reason other than not to overlap with
+  /* PAL kernel starts at address 0x100000 (1M) for no good reason other than not to overlap with
    * the DOS compatibility memory range 0x0 - 0x100000 (1M) and with non-PIE programs' 0x400000 (4M)
-   * start address (we assume that 2.5M is enough for PAL) */
-  . = 0x180000;
+   * start address (we assume that 3M is enough for PAL) */
+  . = 0x100000;
 
   PROVIDE_HIDDEN (__fw_base = .);
   PROVIDE_HIDDEN (__data_start = .);

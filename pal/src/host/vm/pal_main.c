@@ -173,7 +173,9 @@ noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, vo
     if (ret < 0)
         INIT_FAIL("Failed to initialize physical memory");
 
-    ret = memory_pagetables_init(g_pal_public_state.memory_address_end);
+    /* pal_bootloader.S installed tiny page tables that cover [0..32MB) of RAM */
+    ret = memory_pagetables_init(g_pal_public_state.memory_address_end,
+                                 /*current_page_tables_cover_1gb=*/false);
     if (ret < 0)
         INIT_FAIL("Failed to initialize page tables");
 
@@ -181,8 +183,8 @@ noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, vo
     if (ret < 0)
         INIT_FAIL("Failed to initialize preloaded ranges");
 
-    /* PAL binary is located at 1.5MB and may occupy until 4MB, see pal.lds */
-    ret = add_preloaded_range(0x180000UL, 0x280000UL, "pal_binary");
+    /* PAL binary is located at 1MB and may occupy until 4MB, see pal.lds */
+    ret = add_preloaded_range(0x100000UL, 0x300000UL, "pal_binary");
     if (ret < 0)
         INIT_FAIL("Failed to preload PAL-binary memory range");
 

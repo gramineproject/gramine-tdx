@@ -95,37 +95,26 @@ int memory_mark_pages_present(uint64_t addr, size_t size, bool present) {
     return 0;
 }
 
-/* sets up the new page tables hierarchy (with 4KB pages) in range [0x0, memory_address_end)
- * (aligned to the next power of 2); page tables have 1:1 virtual-to-physical address translation */
-int memory_pagetables_init(void* memory_address_end) {
-    /* paged-in memory size must be a power of two; possible values from 4GB to 512GB */
-    size_t max_memory_size = 1;
-    while (max_memory_size < (uintptr_t)memory_address_end)
-        max_memory_size *= 2;
-
-    if (max_memory_size < 4UL * 1024 * 1024 * 1024)
-        max_memory_size = 4UL * 1024 * 1024 * 1024;
-
-    if (max_memory_size > 512UL * 1024 * 1024 * 1024)
-        return -PAL_ERROR_OVERFLOW;
-
+/* sets up the new page tables hierarchy (with 4KB pages) to cover memory range [0x0, memory_size);
+ * page tables have 1:1 virtual-to-physical address translation */
+static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t page_tables_size,
+                           uint64_t* out_pml4_table_base) {
     uint64_t flags = 0x7; /* User, Writable, Present */
 
-    size_t pages_4k_cnt = max_memory_size / (4 * 1024);
-    size_t pages_2m_cnt = max_memory_size / (2 * 1024 * 1024);
-    size_t pages_1g_cnt = max_memory_size / (1 * 1024 * 1024 * 1024);
+    size_t pages_4k_cnt = memory_size / (4 * 1024);
+    size_t pages_2m_cnt = memory_size / (2 * 1024 * 1024);
+    size_t pages_1g_cnt = memory_size / (1 * 1024 * 1024 * 1024);
 
     size_t page_tables_cnt     = pages_4k_cnt / 512;
     size_t page_dir_tables_cnt = pages_2m_cnt / 512;
 
     size_t total_tables_cnt = page_tables_cnt + page_dir_tables_cnt + /*PDP=*/1 + /*PML4=*/1;
-    if (total_tables_cnt * 4096 > PAGE_TABLES_SIZE) {
-        /* page tables can occupy no more than PAGE_TABLES_SIZE (see below) */
+    if (total_tables_cnt * 4096 > page_tables_size) {
+        /* page tables can occupy no more than page_tables_size, check for sanity */
         return -PAL_ERROR_NOMEM;
     }
 
-    /* region [PAGE_TABLES_ADDR, PAGE_TABLES_ADDR + PAGE_TABLES_SIZE) is reserved for page tables */
-    uint64_t ptr = PAGE_TABLES_ADDR;
+    uint64_t ptr = page_tables_addr;
 
     /* page tables with PTE leaf entries */
     uint64_t page_tables_base = ptr;
@@ -164,8 +153,52 @@ int memory_pagetables_init(void* memory_address_end) {
     memcpy((void*)ptr, &entry, sizeof(entry));
 
     __asm__ volatile("mov %%rax, %%cr3" : : "a"(pml4_table_base));
-    g_pml4_table_base = pml4_table_base;
+
+    if (out_pml4_table_base)
+        *out_pml4_table_base = pml4_table_base;
     return 0;
+}
+
+int memory_pagetables_init(void* memory_address_end, bool current_page_tables_cover_1gb) {
+    /*
+     * First set up temporary page tables hierarchy to cover range [0x0, 1GB), if current page
+     * tables don't do this already. To cover this range, it's enough to have page tables in the
+     * region [4MB, 8MB) -- these temporary page tables will be overwritten anyway by the actual
+     * page tables hierarchy set up below.
+     *
+     * Note that at this point only the PAL binary is loaded into memory, and it is either located
+     * at [1MB, 4MB) in non-TDX case, or somewhere at 1GB or higher in TDX case. So there will be no
+     * overlap with this temporary page tables hierarchy at [4MB, 8MB).
+     *
+     * We need this temporary hierarchy because bootloaders of some PALs (e.g. VM) set up static
+     * page tables that cover small range [0x0, 32MB) which doesn't contain the [PAGE_TABLES_ADDR,
+     * PAGE_TABLES_ADDR + PAGE_TABLES_SIZE) final page-tables region.
+     */
+    if (!current_page_tables_cover_1gb) {
+        int ret = pagetables_init(/*memory_size=*/1UL * 1024 * 1024 * 1024,
+                                  /*page_tables_addr=*/4UL * 1024 * 1024,
+                                  /*page_tables_size=*/4UL * 1024 * 1024,
+                                  /*out_pml4_table_base=*/NULL);
+        if (ret < 0)
+            return ret;
+    }
+
+    /* now set up the new page tables hierarchy to cover range [0x0, memory_address_end) (aligned to
+     * the next power of 2); we will use these page tables until the end of execution */
+    size_t memory_size = 1;
+    while (memory_size < (uintptr_t)memory_address_end)
+        memory_size *= 2;
+
+    /* memory size must be at least 4GB in size, because [3GB, 4GB) range is used for PCI, etc. */
+    if (memory_size < 4UL * 1024 * 1024 * 1024)
+        memory_size = 4UL * 1024 * 1024 * 1024;
+
+    /* memory size must be at most 512GB in size, because the current construction of page tables
+     * relies on a single PDP page which limits max addressable memory to 512GB */
+    if (memory_size > 512UL * 1024 * 1024 * 1024)
+        return -PAL_ERROR_OVERFLOW;
+
+    return pagetables_init(memory_size, PAGE_TABLES_ADDR, PAGE_TABLES_SIZE, &g_pml4_table_base);
 }
 
 int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_size,
@@ -176,16 +209,15 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
         if (e820_entries[i].type == E820_ADDRESS_RANGE_MEMORY)
             continue;
 
-        if (e820_entries[i].type == E820_ADDRESS_RANGE_RESERVED &&
-                e820_entries[i].address == 0x000800000UL) {
-            /* special handling of TD-Shim: it puts initial page tables at [0x800000, 0x820000) and
-             * marks them as Reserved, but we use our own page tables so we can re-use this range */
-            continue;
-        }
-
         if (e820_entries[i].address < PAGE_TABLES_ADDR + PAGE_TABLES_SIZE &&
                 PAGE_TABLES_ADDR < e820_entries[i].address + e820_entries[i].size) {
             /* a reserved range overlaps with our page tables range */
+            return -PAL_ERROR_DENIED;
+        }
+
+        if (e820_entries[i].address < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
+                SHARED_MEM_ADDR < e820_entries[i].address + e820_entries[i].size) {
+            /* a reserved range overlaps with our shared memory range */
             return -PAL_ERROR_DENIED;
         }
 
@@ -194,13 +226,23 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
             return -PAL_ERROR_NOMEM;
     }
 
-    /* Mark the following memory regions as reserved (in addition to the above ones, extracted from
+    /*
+     * Mark the following memory regions as reserved (in addition to the above ones, extracted from
      * the E820 table), so that memory allocator doesn't use them:
-     *   - [0, 1MB):       legacy DOS (includes DOS area, SMM memory, System BIOS)
-     *   - [146MB, 256MB): page tables
-     *   - [256MB, 512MB): shared memory for virtqueues
-     *   - [2GB, 3GB):     memory hole (QEMU doesn't map any memory here)
-     *   - [3GB, 4GB):     PCI (includes BARs, LAPIC, IOAPIC)
+     *   - [0, 1MB):       legacy DOS (includes DOS area, SMM memory, System BIOS),
+     *   - [512MB, 648MB): page tables,
+     *   - [648MB, 896MB): shared memory for virtqueues,
+     *   - [2GB, 3GB):     memory hole (QEMU doesn't map any memory here),
+     *   - [3GB, 4GB):     PCI (includes BARs, LAPIC, IOAPIC).
+     *
+     * Some notes on how this layout interplays with other regions:
+     *   - In non-TDX case, the PAL binary is put at [1MB, 4MB).
+     *   - In TDX case, the PAL binary is put at the top of RAM. We enforce RAM to be at least 1GB,
+     *     so in the worst case, the PAL binary + other TDShim data is put at [896MB, 1024MB). Note
+     *     that TDShim uses up to 128MB for the payload (PAL binary) and other data.
+     *   - Applications may be EXEC programs, which means they will be put at 4MB. The largest app
+     *     binaries we've seen in the wild have up to 300MB. Our layout allows to put such app
+     *     binary at [4MB, 512MB), which is enough to host a 508MB-sized binary.
      */
     ret = callback(0x0UL, 0x100000UL, "dos_memory_addr");
     if (ret < 0)
@@ -240,6 +282,10 @@ int memory_init(e820_table_entry* e820_entries, size_t e820_entries_size,
 
     if (memory_address_start > PAGE_TABLES_ADDR ||
             memory_address_end < PAGE_TABLES_ADDR + PAGE_TABLES_SIZE)
+        return -PAL_ERROR_DENIED;
+
+    if (memory_address_start > SHARED_MEM_ADDR ||
+            memory_address_end < SHARED_MEM_ADDR + SHARED_MEM_SIZE)
         return -PAL_ERROR_DENIED;
 
     *out_memory_address_start = (void*)memory_address_start;

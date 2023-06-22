@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
-#define PAGE_TABLES_ADDR 0x9200000UL           /* page tables occupy [146MB, 256MB) */
-#define PAGE_TABLES_SIZE (110UL * 1024 * 1024) /* 110MB, enough to describe 24GB of addr space */
+#define PAGE_TABLES_ADDR 0x20000000UL          /* page tables occupy [512MB, 648MB) */
+#define PAGE_TABLES_SIZE (136UL * 1024 * 1024) /* 136MB, enough to describe 64GB of addr space */
 
-#define SHARED_MEM_ADDR 0x10000000UL           /* memory for virtqueues occupies [256MB, 512MB) */
-#define SHARED_MEM_SIZE (256UL * 1024 * 1024)  /* 256MB */
+#define SHARED_MEM_ADDR 0x028800000UL          /* memory for virtqueues occupies [648MB, 896MB) */
+#define SHARED_MEM_SIZE (248UL * 1024 * 1024)  /* 248MB */
 
 /* equivalent to E820_TABLE_ENTRY in EFI_HOB_E820_TABLE (needs to be packed) */
 #define E820_ADDRESS_RANGE_MEMORY   1
@@ -30,7 +30,7 @@ int memory_free_shared_region(void* addr, size_t size);
 int memory_find_page_table_entry(uint64_t addr, uint64_t** out_pte_addr);
 int memory_mark_pages_present(uint64_t addr, size_t size, bool present);
 
-int memory_pagetables_init(void* memory_address_end);
+int memory_pagetables_init(void* memory_address_end, bool current_page_tables_cover_1gb);
 int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_size,
                           int (*callback)(uintptr_t addr, size_t size, const char* comment));
 
