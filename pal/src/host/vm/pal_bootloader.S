@@ -45,30 +45,30 @@ _start32:
     .align  0x1000
 
 // We use 1:1 virtual-to-physical address translation. For this, we use the classic 4-level paging
-// scheme. In this bootloader, we define a static page table hierarchy spanning 256MB of RAM:
+// scheme. In this bootloader, we define a static page table hierarchy spanning 32MB of RAM:
 //   1. CR3 register points to a PML4 table, which contains a single PML4E 64-bit entry
 //   2. PML4E entry points to a PDPT table, which contains a single PDPTE 64-bit entries
-//   3. PDPTE entry points to a PD table, which contains 128 PDE 64-bit entries
-//   4. PDE entry points to one of 128 PTs (page tables), each containing 512 PTE entries
+//   3. PDPTE entry points to a PD table, which contains 16 PDE 64-bit entries
+//   4. PDE entry points to one of 16 PTs (page tables), each containing 512 PTE entries
 //
-// Note that each PT has 512 entries, each entry pointing to a 4KB page. There are 128 PTs, thus,
-// our page table hierarchy describes 256MB of memory. After this bootloader completes and jumps to
-// the 64-bit C kernel, the kernel immediately allocates memory for the final page table hierarchy
+// Note that each PT has 512 entries, each entry pointing to a 4KB page. There are 16 PTs, thus, our
+// page table hierarchy describes 32MB of memory. After this bootloader completes and jumps to the
+// 64-bit C kernel, the kernel immediately allocates memory for the final page table hierarchy
 // spanning up to 512GB of memory and rewires the CR3 register to this final hierarchy.
 //
-// The below static PT hierarchy constitutes (128 + 1 + 1 + 1) 4KB pages, or 524KB of data segment
-// of the final kernel executable in total.
+// The below static PT hierarchy constitutes (16 + 1 + 1 + 1) 4KB pages, or 76KB of data segment of
+// the final kernel executable in total.
 //
 // For visual represenation of this address translation, see Figure 4-8 in Intel SDM.
 
-// 4KB leaf entries (PTE): 128 pages, each with 512 entries
-1:  .rept   128 * 512
+// 4KB leaf entries (PTE): 16 pages, each with 512 entries
+1:  .rept   16 * 512
     .quad   (. - 1b) / 8 * (1 << 12) + 0x7    // 7 = User, Writable, Present
     .endr
     .align  0x1000, 0
 
-// 2MB (PDE) entries: one page with 128 entries
-2:  .rept   128
+// 2MB (PDE) entries: one page with 16 entries
+2:  .rept   16
     .quad   1b + (. - 2b) / 8 * 0x1000 + 0x7  // 7 = User, Writable, Present
     .endr
     .align  0x1000, 0
