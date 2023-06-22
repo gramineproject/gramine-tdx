@@ -44,8 +44,8 @@ int _PalThreadGetCpuAffinity(struct pal_handle* thread, unsigned long* cpu_mask,
                              size_t cpu_mask_len) {
     /* NOTE: currently dummy */
     __UNUSED(thread);
-    __UNUSED(cpu_mask);
     __UNUSED(cpu_mask_len);
+    cpu_mask[0] = 1; /* set single (first) core */
     return 0;
 }
 
