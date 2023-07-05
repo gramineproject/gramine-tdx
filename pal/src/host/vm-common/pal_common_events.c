@@ -87,7 +87,7 @@ int pal_common_event_wait(struct pal_handle* handle, uint64_t* timeout_us) {
         if (timeout_us) {
             if (*timeout_us == 0) {
                 /* user instructed not to sleep, so return immediately */
-                ret = 0;
+                ret = -PAL_ERROR_TRYAGAIN;
                 goto out;
             }
 
