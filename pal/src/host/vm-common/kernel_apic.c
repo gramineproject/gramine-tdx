@@ -25,22 +25,6 @@
 
 extern uint64_t g_tsc_mhz;
 
-static int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size) {
-    uint64_t mark_addr = addr;
-    while (mark_addr < addr + size) {
-        uint64_t* pte_addr;
-        int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
-        if (ret < 0)
-            return ret;
-
-        *pte_addr |= 1UL << 4; /* set bit 4 (PCD = Page-level cache disable) */
-        invlpg(mark_addr);
-
-        mark_addr += 4096;
-    }
-    return 0;
-}
-
 static void ioapic_write_reg(uint32_t offset, uint32_t val) {
     uint32_t* ioapic_regsel_addr = (uint32_t*)(IOAPIC_ADDR + 0x00);
     uint32_t* ioapic_win_addr    = (uint32_t*)(IOAPIC_ADDR + 0x10);
@@ -122,7 +106,7 @@ void lapic_signal_interrupt_complete(void) {
 
 int apic_init(void) {
     /* IOAPIC initialization */
-    int ret = memory_mark_pages_strong_uncacheable(IOAPIC_ADDR, IOAPIC_SIZE);
+    int ret = memory_mark_pages_strong_uncacheable(IOAPIC_ADDR, IOAPIC_SIZE, /*mark=*/true);
     if (ret < 0)
         return ret;
 

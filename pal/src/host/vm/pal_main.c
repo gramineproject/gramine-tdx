@@ -39,10 +39,13 @@ static struct pal_handle* g_first_thread_handle = NULL;
 static struct pal_handle* g_idle_thread_handle = NULL;
 static struct pal_handle* g_bottomhalves_thread_handle = NULL;
 
-#define FW_CFG_RAM_SIZE 0x03
-static uint64_t rdfwcfg64(uint64_t cfg) {
-    short port;
-    size_t len;
+#define FW_CFG_RAM_SIZE 0x03 /* 64-bit RAM size in bytes */
+#define FW_CFG_NB_CPUS  0x05 /* 32-bit number of vCPUs */
+
+/* works for little-endian variables of all bit sizes */
+static uint64_t rdfwcfg(uint64_t cfg, size_t size) {
+    short port; /* unused, added for sanity */
+    size_t len; /* unused, added for sanity */
     __asm__ volatile(
         "   out  %w0, %1\n"
         "   inc  %1\n"
@@ -50,8 +53,9 @@ static uint64_t rdfwcfg64(uint64_t cfg) {
         "   ror  $8, %0\n"
         "   loop 1b\n"
         : "+a"(cfg), "=d"(port), "=c"(len)
-        : "1"(FW_CFG_PORT_SEL), "2"(sizeof(cfg))
+        : "1"(FW_CFG_PORT_SEL), "2"(size)
         );
+    cfg = cfg >> (8 * (sizeof(uint64_t) - size));
     return cfg;
 }
 
@@ -85,7 +89,6 @@ static int tsc_frequency_init(void) {
     return 0;
 }
 
-#define MSR_IA32_APIC_BASE 0x1B
 static int switch_apic_to_x2_mode(void) {
     uint32_t words[CPUID_WORD_NUM];
     cpuid(FEATURE_FLAGS_LEAF, 0, words);
@@ -147,15 +150,8 @@ noreturn static void print_usage_and_exit(void) {
 
 noreturn int pal_start_continue(void* cmdline_);
 
-/* called by `pal_bootloader.S` on kernel startup */
-noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, void* unused,
-                          void* param) {
-    __UNUSED(gaw);
-    __UNUSED(vp_index);
-    __UNUSED(cpuid1_eax);
-    __UNUSED(unused);
-    __UNUSED(param);
-
+/* called by `vm_bootloader.S` on kernel startup */
+noreturn void pal_start_c(void) {
     int ret;
 
     wrmsr(MSR_IA32_GS_BASE, 0x0); /* just for sanity: no current-thread TCB at init */
@@ -165,7 +161,7 @@ noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, vo
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
 
     e820_table_entry e820 = { .address = 0x0,
-                              .size    = rdfwcfg64(FW_CFG_RAM_SIZE),
+                              .size    = rdfwcfg(FW_CFG_RAM_SIZE, sizeof(uint64_t)),
                               .type    = E820_ADDRESS_RANGE_MEMORY };
 
     ret = memory_init(&e820, sizeof(e820), &g_pal_public_state.memory_address_start,
@@ -173,7 +169,7 @@ noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, vo
     if (ret < 0)
         INIT_FAIL("Failed to initialize physical memory");
 
-    /* pal_bootloader.S installed tiny page tables that cover [0..32MB) of RAM */
+    /* vm_bootloader.S installed tiny page tables that cover [0..32MB) of RAM */
     ret = memory_pagetables_init(g_pal_public_state.memory_address_end,
                                  /*current_page_tables_cover_1gb=*/false);
     if (ret < 0)
@@ -224,6 +220,11 @@ noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, vo
     ret = syscalls_init();
     if (ret < 0)
         INIT_FAIL("Failed to initialize system call handling");
+
+    uint32_t num_cpus = rdfwcfg(FW_CFG_NB_CPUS, sizeof(uint32_t));
+    if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
+        INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
+                  MAX_NUM_CPUS);
 
     /* interrupts must be enabled (via `sti`) after all other parts of the kernel are initialized */
     ret = interrupts_init();

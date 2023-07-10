@@ -13,6 +13,10 @@
 
 #include "pal_common_structs.h"
 
+/* FIXME: this should be moved to an appropriate header later */
+#define MSR_IA32_APIC_BASE 0x1B
+#define MAX_NUM_CPUS 1
+
 DEFINE_LIST(pal_handle);
 typedef struct pal_handle {
     PAL_HDR hdr;
@@ -53,5 +57,4 @@ DEFINE_LISTP(pal_handle);
 /* Set if an error was seen on this handle. Currently only set by `_PalStreamsWaitEvents`. */
 #define PAL_HANDLE_FD_ERROR     4
 
-noreturn void pal_start_c(size_t gaw, unsigned vp_index, unsigned cpuid1_eax, void* unused,
-                          void* param);
+noreturn void pal_start_c(void);
