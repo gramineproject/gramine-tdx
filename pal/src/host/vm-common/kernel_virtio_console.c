@@ -27,6 +27,10 @@
 struct virtio_console* g_console = NULL;
 bool g_console_trigger_bottomhalf = false;
 
+/* coarse-grained locks to sync RX and TX operations on multi-core systems, see kernel_virtio.h */
+static spinlock_t g_console_receive_lock = INIT_SPINLOCK_UNLOCKED;
+static spinlock_t g_console_transmit_lock = INIT_SPINLOCK_UNLOCKED;
+
 /* for garbage collecting old descriptors */
 static uint16_t g_gc_descs[VIRTIO_CONSOLE_QUEUE_SIZE];
 static uint16_t g_gc_desc_idx;
@@ -47,7 +51,7 @@ int virtio_console_isr(void) {
         uint16_t host_used_idx = vm_shared_readw(&g_console->rq->used->idx);
         if (host_used_idx != g_console->rq->seen_used) {
             /* we only care about the RX queue, so only kick bottomhalf when received input */
-            g_console_trigger_bottomhalf = true;
+            __atomic_store_n(&g_console_trigger_bottomhalf, true, __ATOMIC_RELEASE);
         }
     }
 
@@ -59,14 +63,17 @@ int virtio_console_isr(void) {
 }
 
 static int handle_rq(void) {
+    int ret;
     bool received = false;
 
+    spinlock_lock(&g_console_receive_lock);
     uint16_t host_used_idx = vm_shared_readw(&g_console->rq->used->idx);
 
     if (host_used_idx - g_console->rq->seen_used > g_console->rq->queue_size) {
         /* malicious (impossible) value reported by the host; note that this check works also in
          * cases of int wrap */
-        return -PAL_ERROR_DENIED;
+        ret = -PAL_ERROR_DENIED;
+        goto fail;
     }
 
     while (host_used_idx != g_console->rq->seen_used) {
@@ -75,7 +82,8 @@ static int handle_rq(void) {
 
         if (desc_idx >= g_console->rq->queue_size) {
             /* malicious (out of bounds) descriptor index */
-            return -PAL_ERROR_DENIED;
+            ret = -PAL_ERROR_DENIED;
+            goto fail;
         }
 
         uint64_t addr = vm_shared_readq(&g_console->rq->desc[desc_idx].addr);
@@ -84,17 +92,20 @@ static int handle_rq(void) {
         if (addr < (uintptr_t)g_console->shared_rq_buf ||
                 addr >= (uintptr_t)g_console->shared_rq_buf + VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
             /* malicious (out of bounds) incoming message */
-            return -PAL_ERROR_DENIED;
+            ret = -PAL_ERROR_DENIED;
+            goto fail;
         }
 
         if ((addr - (uintptr_t)g_console->shared_rq_buf) % VIRTIO_CONSOLE_ITEM_SIZE) {
             /* malicious (not aligned on max item size) offset of the incoming message */
-            return -PAL_ERROR_DENIED;
+            ret = -PAL_ERROR_DENIED;
+            goto fail;
         }
 
         if (size > VIRTIO_CONSOLE_ITEM_SIZE) {
             /* malicious (out of bounds) size of the incoming message */
-            return -PAL_ERROR_DENIED;
+            ret = -PAL_ERROR_DENIED;
+            goto fail;
         }
 
         if (g_console->rq_buf_pos + size > VIRTIO_CONSOLE_RQ_BUF_SIZE) {
@@ -126,6 +137,7 @@ static int handle_rq(void) {
         g_console->rq->seen_used++;
         received = true;
     }
+    spinlock_unlock(&g_console_receive_lock);
 
     if (received) {
         vm_mmio_writew(g_console->rq_notify_addr, /*queue_sel=*/0);
@@ -133,6 +145,9 @@ static int handle_rq(void) {
     }
 
     return 0;
+fail:
+    spinlock_unlock(&g_console_receive_lock);
+    return ret;
 }
 
 /* called from the bottomhalf thread in normal context (not interrupt context) */
@@ -141,23 +156,31 @@ int virtio_console_bottomhalf(void) {
 }
 
 int64_t virtio_console_read(char* buffer, size_t size) {
+    int ret;
+    size_t bytes_read;
+
     if (!g_console)
         return -PAL_ERROR_BADHANDLE;
 
+    spinlock_lock(&g_console_receive_lock);
     if (g_console->rq_buf_pos == 0) {
-        if (!g_console_trigger_bottomhalf) {
+        if (!__atomic_load_n(&g_console_trigger_bottomhalf, __ATOMIC_ACQUIRE)) {
             /* there is nothing in the RQ buffer and VMM stopped sending us any new input */
-            return 0;
+            bytes_read = 0;
+            ret = 0;
+            goto out;
         }
-        return -PAL_ERROR_TRYAGAIN;
+        ret = -PAL_ERROR_TRYAGAIN;
+        goto out;
     }
 
     if (g_console->rq_buf[g_console->rq_buf_pos - 1] != '\n') {
         /* non-blocking caller must return TRYAGAIN; blocking caller must sleep on this */
-        return -PAL_ERROR_TRYAGAIN;
+        ret = -PAL_ERROR_TRYAGAIN;
+        goto out;
     }
 
-    size_t bytes_read = MIN(g_console->rq_buf_pos, size);
+    bytes_read = MIN(g_console->rq_buf_pos, size);
     memcpy(buffer, g_console->rq_buf, bytes_read);
 
     if (size < g_console->rq_buf_pos) {
@@ -166,7 +189,10 @@ int64_t virtio_console_read(char* buffer, size_t size) {
     }
 
     g_console->rq_buf_pos = 0;
-    return (int64_t)bytes_read;
+    ret = 0;
+out:
+    spinlock_unlock(&g_console_receive_lock);
+    return ret < 0 ? ret : (int64_t)bytes_read;
 }
 
 /* expects a null-terminated string */
@@ -176,6 +202,7 @@ int virtio_console_nprint(const char* s, size_t size) {
     if (!g_console)
         return -PAL_ERROR_BADHANDLE;
 
+    spinlock_lock(&g_console_transmit_lock);
     if (g_console->shared_tq_buf_pos + size > VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
         /* this message exceeds shared_tq_buf, assume that messages at the beginning of
          * shared_tq_buf were already consumed (and printed) by VMM and start overwriting them */
@@ -185,7 +212,8 @@ int virtio_console_nprint(const char* s, size_t size) {
     size_t left_in_shared_tq_buf = VIRTIO_CONSOLE_SHARED_BUF_SIZE - g_console->shared_tq_buf_pos;
     if (size > left_in_shared_tq_buf) {
         /* message doesn't fit into shared_tq_buf, cannot print it */
-        return -PAL_ERROR_NOMEM;
+        ret = -PAL_ERROR_NOMEM;
+        goto out;
     }
 
     /*
@@ -207,7 +235,7 @@ int virtio_console_nprint(const char* s, size_t size) {
     uint16_t desc_idx;
     ret = virtq_alloc_desc(g_console->tq, shared_tq_buf_addr, size, /*flags=*/0, &desc_idx);
     if (ret < 0)
-        return ret;
+        goto out;
 
     g_gc_descs[g_gc_desc_idx % VIRTIO_CONSOLE_QUEUE_SIZE] = desc_idx;
     g_gc_desc_idx++;
@@ -220,7 +248,10 @@ int virtio_console_nprint(const char* s, size_t size) {
     vm_shared_writew(&g_console->tq->avail->idx, g_console->tq->cached_avail_idx);
 
 	vm_mmio_writew(g_console->tq_notify_addr, /*queue_sel=*/1);
-    return 0;
+    ret = 0;
+out:
+    spinlock_unlock(&g_console_transmit_lock);
+    return ret;
 }
 
 /* expects a null-terminated string */

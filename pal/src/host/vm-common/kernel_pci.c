@@ -9,6 +9,9 @@
  *   - https://people.freebsd.org/~jhb/papers/bsdcan/2007/article/node5.html
  *   - http://www.osdever.net/tutorials/view/multiprocessing-support-for-hobby-oses-explained
  *   - https://forum.osdev.org/viewtopic.php?f=1&t=21745
+ *
+ * Notes on multi-core synchronization:
+ *   - all PCI operations happen only on init, no sync required
  */
 
 #include <stddef.h>

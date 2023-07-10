@@ -84,8 +84,13 @@ QEMU_MEM_SIZE=${QEMU_MEM_SIZE:-$GRAMINE_RAM_SIZE}
 # If both file and envvar parsing fail, then fall back to the default value of 8GB.
 QEMU_MEM_SIZE=${QEMU_MEM_SIZE:-"8G"}
 
+# Try the config from environment variable `GRAMINE_CPU_NUM`, then fall back to default of 1.
+QEMU_CPU_NUM=${QEMU_CPU_NUM:-$GRAMINE_CPU_NUM}
+QEMU_CPU_NUM=${QEMU_CPU_NUM:-"1"}
+
 QEMU_PATH="qemu"
-QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc -m $QEMU_MEM_SIZE -smp 1"
+QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc \
+    -m $QEMU_MEM_SIZE -smp $QEMU_CPU_NUM"
 QEMU_OPTS="-enable-kvm -vga none -nographic -no-reboot -monitor chardev:mux -no-hpet \
     -object memory-backend-file,id=mem,size=$QEMU_MEM_SIZE,mem-path=/dev/shm,share=on \
     -numa node,memdev=mem"

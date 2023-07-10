@@ -1,7 +1,14 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 /* Copyright (C) 2023 Intel Corporation */
 
-/* Hardware/software interrupts. See also the bootloader code. */
+/*
+ * Hardware/software interrupts. See also the bootloader code.
+ *
+ * Notes on multi-core synchronization:
+ *   - processing different interrupt numbers in isr_c() requires different sync techniques, see
+ *     comments in that func for more details
+ *   - all other funcs are used only at init, no sync required
+ */
 
 #include <stdint.h>
 
@@ -13,6 +20,7 @@
 #include "kernel_apic.h"
 #include "kernel_interrupts.h"
 #include "kernel_memory.h"
+#include "kernel_multicore.h"
 #include "kernel_pci.h"
 #include "kernel_sched.h"
 #include "kernel_time.h"
@@ -80,7 +88,10 @@ void isr_c(struct isr_regs* regs) {
             }
             break;
         case 32:
-            notify_about_timeouts_uninterruptable();
+            if (get_per_cpu_data()->cpu_id == 0) {
+                /* only CPU0 handles timeouts and alarms */
+                notify_about_timeouts_uninterruptable();
+            }
             lapic_timer_rearm();
             if (regs->cs != kernel_cs) {
                 /* only reschedule if timer interrupt occurs while in userland (i.e., we use
@@ -92,6 +103,7 @@ void isr_c(struct isr_regs* regs) {
             ret = 0;
             break;
         case 64:
+            assert(get_per_cpu_data()->cpu_id == 0);
             ret = virtio_console_isr();
             if (ret < 0)
                 triple_fault();
@@ -130,22 +142,27 @@ static int tss_init(void) {
     extern struct tss_64bitmode tss_64bitmode[];
     extern struct tss_64bitmode_segment_descriptor tss_64bitmode_desc[];
 
-    struct tss_64bitmode_segment_descriptor* tss_desc = tss_64bitmode_desc;
-
-    /* *.S must have initialized TSS already, check it */
+    /* *.S must have initialized TSS already (except for interrupt stack), check it */
     struct tss_64bitmode* tss = tss_64bitmode;
+    tss += get_per_cpu_data()->cpu_id;
+
     if (tss->rsp0_unused != 0 || tss->rsp1_unused != 0 || tss->rsp2_unused != 0)
         return -PAL_ERROR_BADADDR;
-    if (tss->ist1 == 0)
+    if (tss->ist1 != 0)
         return -PAL_ERROR_BADADDR;
     if (tss->iomap_base_unused != sizeof(*tss))
         return -PAL_ERROR_BADADDR;
 
-    uint64_t tss_addr_uint64 = (uint64_t)tss;
-    tss_desc->base_low_16bits  = tss_addr_uint64 & 0xFFFF;
-    tss_desc->base_low_8bits   = (tss_addr_uint64 >> 16) & 0xFF;
-    tss_desc->base_mid_8bits   = (tss_addr_uint64 >> 24) & 0xFF;
-    tss_desc->base_high_32bits = (tss_addr_uint64 >> 32) & 0xFFFFFFFF;
+    /* interrupt_stack is a base address, but we want top of the stack */
+    tss->ist1 = (uint64_t)get_per_cpu_data()->interrupt_stack + INTERRUPT_STACK_SIZE;
+
+    struct tss_64bitmode_segment_descriptor* tss_desc = tss_64bitmode_desc;
+    tss_desc += get_per_cpu_data()->cpu_id;
+
+    tss_desc->base_low_16bits  = (uint64_t)tss & 0xFFFF;
+    tss_desc->base_low_8bits   = ((uint64_t)tss >> 16) & 0xFF;
+    tss_desc->base_mid_8bits   = ((uint64_t)tss >> 24) & 0xFF;
+    tss_desc->base_high_32bits = ((uint64_t)tss >> 32) & 0xFFFFFFFF;
     tss_desc->limit_low_16bits = sizeof(*tss) & 0xFFFF;
     return 0;
 }
@@ -155,6 +172,11 @@ static int idt_init(void) {
     g_idt = (struct idt_gate*)&idt_start;
 
     int ret;
+
+    if (get_per_cpu_data()->cpu_id != 0) {
+        /* all CPUs share the same IDT, so enough to initialize IDT only once */
+        return 0;
+    }
 
     /* hardware interrupts */
     ret = idt_gate_set(0,  &isr_0);  /* Divide-by-zero Error (#DE) */
@@ -281,9 +303,12 @@ int interrupts_init(void) {
     __asm__ volatile("lgdt %0" :: "m"(gdtr));
     __asm__ volatile("lidt %0" :: "m"(idtr));
 
-    /* flush TSS and enable interrupts */
-    ltr((char*)tss_64bitmode_desc - gdt_start);
-    sti();
+    /* flush TSS descriptor */
+    struct tss_64bitmode_segment_descriptor* tss_desc = tss_64bitmode_desc;
+    tss_desc += get_per_cpu_data()->cpu_id;
+    ltr((char*)tss_desc - gdt_start);
 
+    /* enable interrupts */
+    sti();
     return 0;
 }

@@ -13,10 +13,6 @@
 
 #include "pal_common_structs.h"
 
-/* FIXME: this should be moved to an appropriate header later */
-#define MSR_IA32_APIC_BASE 0x1B
-#define MAX_NUM_CPUS 1
-
 DEFINE_LIST(pal_handle);
 typedef struct pal_handle {
     PAL_HDR hdr;

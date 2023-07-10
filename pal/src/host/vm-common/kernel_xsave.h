@@ -57,6 +57,7 @@ enum VM_XFEATURE {
 #define VM_XFEATURE_MASK_AVX512    (VM_XFEATURE_MASK_OPMASK | VM_XFEATURE_MASK_ZMM_Hi256 \
                                       | VM_XFEATURE_MASK_Hi16_ZMM)
 
+extern uint64_t g_xcr0;
 extern uint32_t g_xsave_size;
 extern const uint32_t g_xsave_reset_state[VM_XSAVE_RESET_STATE_SIZE / sizeof(uint32_t)];
 

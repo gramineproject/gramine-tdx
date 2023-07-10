@@ -11,6 +11,9 @@
 #include "cpu.h"
 #include "spinlock.h"
 
+#define INTERRUPT_STACK_SIZE      0x4000
+#define INTERRUPT_XSAVE_AREA_SIZE 0x4000 /* 16KB, should be enough for current XSAVE areas */
+
 /* Registers for ISR pushed on the stack by hardware + `isr_x()` prologues */
 struct isr_regs {
     /* pointer to FP regs (aka XSAVE area), pushed by ISRs in *.S */
