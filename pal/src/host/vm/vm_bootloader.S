@@ -4,42 +4,54 @@
 .endm
 
     globl   pal_start
-    globl   _end
 
 _start64:
-    mov     %edi, %edx          // restore %edx to CPUID[1].EAX
-    mov     %ebx, %edi          // %ebx contains GPAW upon reset
     call    pal_start_c
     hlt
     jmp     .
 
-_start32:
     .code32
+_start32:
     lgdt    (_gdtr - _start32)(%ebp)
-    lidt    (_idtr - _start32)(%ebp)
+
     mov     $(_gdt_entry_kernel_cs - _gdt_start + 8), %eax  // 32-bit kernel data at this offset
     mov     %eax, %ds
     mov     %eax, %es
     mov     %eax, %fs
     mov     %eax, %gs
     mov     %eax, %ss
+
+    lea     (_pml4_table_base - _start32)(%ebp), %eax
+    mov     %eax, %cr3
+
+    mov     %cr4, %eax
+    or      $(1 << 18) + (1 << 10) + (1 << 9) + (1 << 6) + (1 << 5), %eax
+    mov     %eax, %cr4                  // OSXSAVE, OSXMMEXCPT, OSFXSR, MCE, PAE
+
+    xor     %edx, %edx
+    mov     $3, %eax                    // SSE and X87
+    xsetbv
+
+    mov     %cr0, %eax
+    or      $(1 << 31), %eax            // PG
+    mov     %eax, %cr0
+
     lea     (_sys_initial_stack - _start32)(%ebp), %esp
     lea     (_start64 - _start32)(%ebp), %eax
     push    $(_gdt_entry_kernel_cs - _gdt_start)
     push    %eax
-    lea     (_pml4_table_base - _start32)(%ebp), %eax
-    mov     %eax, %cr3
-    mov     %cr4, %eax
-    or      $(1 << 18) + (1 << 10) + (1 << 9) + (1 << 5), %eax
-    mov     %eax, %cr4                  // OSXSAVE, OSXMMEXCPT, OSFXSR, PAE
-    xchg    %edx, %edi                  // %edi supposed to be init'ed to 0
-    mov     $3, %eax                    // SSE and X87
-    mov     %edx, %ecx                  // XCR0; PAL will enable more features if available on VM
-    xsetbv
-    mov     %cr0, %eax
-    or      $(1 << 31), %eax            // PG
-    mov     %eax, %cr0
     lret                                // far return to _start64 in 64-bit mode
+
+    .sect   .resetvec, "ax"
+    .align  0x80
+    .fill   _end - . - 0x10, 1, 0xcc
+pal_start:
+    cli
+    cld
+    add     $(_start32 - _end), %ebp
+    jmp     _start32
+    .align  0x80, 0xcc
+_end:
 
     .data
     .align  0x1000
@@ -83,47 +95,23 @@ _pml4_table_base:
     .align  0x1000, 0
 
 
-// IDT
-_idt_start:
-    .rept   256
-    .word   0                                   // VA[15..0] of ISR
-    .word   _gdt_entry_kernel_cs - _gdt_start   // code segment selector
-    .byte   0                                   // Interrupt Task Table offset
-    .byte   0b10001110                          // attributes (P=1, DPL=0, RSV=0, type=1110)
-    .word   0                                   // VA[31..16] of ISR
-    .long   0                                   // VA[64..32] of ISR
-    .long   0                                   // Reserved
-    .endr
-_idtr:
-    .word . - _idt_start - 1
-    .quad _idt_start
-
 // GDT
     .align  0x10
 _gdt_start:
     .quad   0
 _gdt_entry_kernel_cs:
-    .long   0xffff, 0xaf9b00                    // 64-bit kernel code
-    .long   0xffff, 0xcf9300                    // 32-bit kernel data
-_gdt_entry_user_cs:
-    .long   0xffff, 0xcffb00                    // 32-bit user code
-    .long   0xffff, 0xcff300                    // 32-bit user data
-    .long   0xffff, 0xaffb00                    // 64-bit user code
-_tss_64bitmode_desc:
-    .rept   1                   // currently only one CPU core supported
-    .word   0                   // segment limit in bytes, bits 0-15 (will be filled in C)
-    .word   0                   // segment base address, bits 0-15   (will be filled in C)
-    .byte   0                   // segment base address, bits 16-23  (will be filled in C)
-    .byte   0b10001001          // flags, bits 24-31 (P=1, DPL=00, RVD=0, Type=1001 (inactive task))
-    .byte   0                   // segment limit, bits 16-19         (set to zero)
-                                // and flags, bits 20-23 (G=0, RVD=00, AVL=0)
-    .byte   0                   // segment base address, bits 24-31  (will be filled in C)
-    .long   0                   // segment base address, bits 32-63  (will be filled in C)
-    .long   0                   // reserved space
-    .endr
+    .long   0xffff, 0xaf9b00  // 64-bit kernel code
+    .long   0xffff, 0xcf9300  // 32-bit kernel data
+    .long   0x0068, 0xcf8900  // tss
 _gdtr:
     .word   . - _gdt_start - 1
     .quad   _gdt_start
+
+
+    .bss
+    .align  0x10
+    .space  0x4000
+_sys_initial_stack:
 
 
     .sect   .note, "a"
@@ -135,19 +123,3 @@ _gdtr:
 2:  .align  4
 3:  .quad   pal_start
 4:
-
-    .bss
-    .align  0x10
-    .space  0x4000
-_sys_initial_stack:
-
-    .sect   .resetvec, "ax"
-    .align  0x80
-    .fill   _end - . - 0x10, 1, 0xcc
-pal_start:
-    cli
-    cld
-    add     $(_start32 - _end), %ebp    // %ebp init'ed to 0 (same as _end)
-    jmp     _start32
-    .align  0x80, 0xcc
-_end:

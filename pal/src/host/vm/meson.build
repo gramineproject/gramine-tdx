@@ -24,8 +24,6 @@ pal_vm_map = custom_target('pal.map[vm]',
 )
 
 pal_vm_sources = files(
-    'pal_bootloader.S',
-
     'pal_console.c',
     'pal_devices.c',
     'pal_eventfd.c',
@@ -43,6 +41,7 @@ pal_vm_sources = files(
     'pal_streams.c',
     'pal_threading.c',
 
+    'vm_bootloader.S',
     'vm_callbacks.c',
 )
 
