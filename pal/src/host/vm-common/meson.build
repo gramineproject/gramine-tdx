@@ -2,11 +2,13 @@ pal_vm_common_sources = files(
     'kernel_events.S',
     'kernel_static_structs.S',
 
+    'kernel_acpi_madt.c',
     'kernel_apic.c',
     'kernel_debug.c',
     'kernel_files.c',
     'kernel_interrupts.c',
     'kernel_memory.c',
+    'kernel_multicore.c',
     'kernel_pci.c',
     'kernel_sched.c',
     'kernel_syscalls.c',
@@ -27,6 +29,14 @@ pal_vm_common_sources = files(
     'pal_common_sockets.c',
     'pal_common_tf.c',
     'pal_common_threading.c',
+)
+
+pal_vm_common_nontdx_sources = files(
+    'kernel_multicore.S',
+)
+
+pal_vm_common_tdx_sources = files(
+    'kernel_multicore64.S',
 )
 
 pal_vm_common_inc = [

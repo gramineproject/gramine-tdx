@@ -5,6 +5,10 @@
  * Local and I/O APIC, also called LAPIC and IOAPIC. Currently used only for IRQ routing (remapping
  * of IRQs of virtio devices provided by the hypervisor to interrupt vector number of CPU#0).
  *
+ * Notes on multi-core synchronization:
+ *   - I/O APIC operations (redirection of IRQs) happen only on init, no sync required
+ *   - LAPIC operations are local to the CPU, no sync required
+ *
  * References:
  *   - Local APIC: Intel SDM, Volume 3, Chapter 10
  *   - I/O APIC: https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf
@@ -19,9 +23,8 @@
 
 #include "kernel_apic.h"
 #include "kernel_memory.h"
+#include "kernel_time.h"
 #include "vm_callbacks.h"
-
-#define TIMER_PERIOD_US (100 * 1000) /* 100 ms, same as default SCHED_RR interval in Linux */
 
 extern uint64_t g_tsc_mhz;
 
@@ -67,14 +70,14 @@ static void ioapic_redirect_irq(uint8_t irq, uint8_t interrupt_vector) {
     ioapic_write_reg(offset, val);
 }
 
-static void lapic_enable(void) {
+void lapic_enable(void) {
     /* set up spurious interrupt register: with IRQ 39, APIC enabled */
     vm_shared_wrmsr(MSR_INSECURE_IA32_LAPIC_SPURIOUS_INTERRUPT_VECTOR, 39 | 0x100);
 }
 
 /* note that LAPIC timer is out of scope of e.g. Intel TDX, as TDX doesn't virtualize timer MSRs; in
  * other words, we must consider timer operations as insecure */
-static int lapic_timer_init(void) {
+int lapic_timer_init(void) {
     assert(g_tsc_mhz);
 
     uint32_t words[CPUID_WORD_NUM];
@@ -88,13 +91,13 @@ static int lapic_timer_init(void) {
     vm_shared_wrmsr(MSR_INSECURE_IA32_LAPIC_LVT_TIMER, 32 | 0x40000);
 
     /* arm the timer for the first time */
-    uint64_t future_tsc = get_tsc() + TIMER_PERIOD_US * g_tsc_mhz;
+    uint64_t future_tsc = get_tsc() + LAPIC_TIMER_PERIOD_US * g_tsc_mhz;
     vm_shared_wrmsr(MSR_INSECURE_IA32_TSC_DEADLINE, future_tsc);
     return 0;
 }
 
 void lapic_timer_rearm(void) {
-    uint64_t future_tsc = get_tsc() + TIMER_PERIOD_US * g_tsc_mhz;
+    uint64_t future_tsc = get_tsc() + LAPIC_TIMER_PERIOD_US * g_tsc_mhz;
     vm_shared_wrmsr(MSR_INSECURE_IA32_TSC_DEADLINE, future_tsc);
     lapic_signal_interrupt_complete();
 }

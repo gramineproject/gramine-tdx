@@ -74,7 +74,12 @@ _isr_common:
     push    %r9
     push    %r8
 
-    lea     _interrupt_xsave_area(%rip), %rdi
+    mov     $MSR_IA32_GS_KERNEL_BASE, %rcx
+    rdmsr
+    shl     $32, %rdx
+    or      %rdx, %rax
+
+    mov     PER_CPU_DATA_XSAVE_AREA(%rax), %rdi
     push    %rdi
     callq   do_xsave
 
@@ -186,6 +191,10 @@ save_context_and_restore_next:
     mov     %gs:PAL_TCB_VM_CONTEXT_FPREGS, %rdi
     callq   do_xsave
 
+    // after current context is completely saved, may mark the thread as not running anymore
+    // (we cannot do it earlier because then the old thread context would be restored)
+    movl    $0, %gs:PAL_TCB_VM_THREAD_IS_RUNNING
+
 .Lrestore_next_context:
     cmp     $0, %r9                 // check if lock_to_unlock != NULL
     je      .Lskip_spinlock_unlock
@@ -202,6 +211,8 @@ save_context_and_restore_next:
     shr     $32, %rdx
     mov     $MSR_IA32_GS_BASE, %rcx
     wrmsr
+
+    movl    $1, %gs:PAL_TCB_VM_THREAD_IS_RUNNING
 
     mov     %gs:PAL_TCB_VM_CONTEXT_FPREGS, %rdi
     callq   do_xrstor
@@ -271,8 +282,3 @@ __do_xrstor:
 do_xrstor:
     popq %r11
     jmp __do_xrstor
-
-    .bss
-    .align  VM_XSAVE_ALIGN
-_interrupt_xsave_area:
-    .space  0x4000

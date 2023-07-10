@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 /* Copyright (C) 2023 Intel Corporation */
 
-/* System calls via SYSCALL/SYSRET in 64-bit mode. See also the *.S code. */
+/*
+ * System calls via SYSCALL/SYSRET in 64-bit mode. See also the *.S code.
+ *
+ * Notes on multi-core synchronization:
+ *   - all syscall operations happen only on init, no sync required
+ */
 
 #include <stdint.h>
 

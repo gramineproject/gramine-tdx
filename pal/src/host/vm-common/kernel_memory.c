@@ -3,6 +3,15 @@
 
 /*
  * Memory helpers.
+ *
+ * Notes on multi-core synchronization:
+ *   - memory_get_shared_region()/memory_free_shared_region() are used on init, no sync required
+ *   - g_pml4_table_base is set on init, no sync required
+ *   - ops on page tables are currently used on init, no sync required
+ *   - memory_alloc() relies on the fact that no other thread will access/free newly allocated
+ *     memory, so no sync required
+ *   - memory_free() does nothing, no sync required
+ *   - all other funcs are used only at init, no sync required
  */
 
 #include <stdint.h>
@@ -10,10 +19,11 @@
 #include "api.h"
 #include "pal_error.h"
 
+#include "kernel_interrupts.h"
 #include "kernel_memory.h"
 
 /* Beginning of the page table hierarchy */
-static uint64_t g_pml4_table_base;
+uint64_t g_pml4_table_base = 0;
 
 void* memory_get_shared_region(size_t size) {
 	/* trivial shared memory management: allocations in the shared-memory range
