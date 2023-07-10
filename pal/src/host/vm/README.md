@@ -6,18 +6,22 @@
 
 - Ring-0 code consists of:
   - BIOS:    at 4GB
-  - PAL:     at 1.5M (and before 4MB)
+  - PAL:     at 1M (and before 4MB)
   - LibOS:   close to end-of-RAM, but not in below regions
-  - PTs:     at [146MB, 256MB)
-  - VQs:     at [256MB, 512MB) -- this is "shared memory"
+  - PTs:     at [512MB, 648MB)
+  - VQs:     at [648MB, 896MB) -- this is "shared memory"
   - Hole:    from 2GB to 3GB (QEMU/KVM creates this hole)
   - PCI bus: from 3GB to 4GB
   - (the rest space is for app usage)
 
 - Ring-3 / ring-0 separation
 
-- GS segment register is used by Gramine kernel, assumed to never be used by
-  user app (FS segment register is used by user app)
+- GS segment register is used by Gramine kernel to store a software threads's
+  TCB, assumed to never be used by user app (FS segment register is used by user
+  app for its software thread's TCB/TLS)
+
+- GS-KERNEL segment register is used by Gramine kernel to store per-CPU
+  information, such as the interrupt stack and XSAVE area addresses
 
 - Paging: flat single shared address space, no switching, all pages always
   present and RWX, 4KB pages (no huge tables)
@@ -25,7 +29,7 @@
 - Time source: RDTSC (Invariant TSC) for relative time; absolute time is taken
   from the host on QEMU startup
 
-- Timer interrupts: using TSC deadline mode, fired every 100us
+- Timer interrupts: using TSC deadline mode, fired every 100ms
 
 - Timeouts, alarms, waiting/sleeping with timeouts
 
@@ -39,7 +43,7 @@
 
 - Randomness: via `rdrand` instruction
 
-- CPUID: mostly via `cpuid` instruction, but some returns are hard-coded
+- CPUID: via `cpuid` instruction, as in normal VM it is trusted
 
 - No pre-defined environment variables
 
@@ -59,9 +63,7 @@
 
 - `_PalThreadResume()`
 
-- Multi-core (currently very single-core specific; data races are possible)
-
-- CPU/NUMA topology (currently hard-coded single NUMA node and single core)
+- CPU/NUMA topology (currently hard-coded single NUMA node)
 
 - Debugging support
 

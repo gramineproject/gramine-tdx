@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 /* Copyright (C) 2023 Intel Corporation */
 
+#include "asm-offsets.h"
+
 .macro globl sym
 .globl \sym
 .hidden \sym
@@ -22,19 +24,19 @@
 //
 // Barebones 64-bit-mode TSS: the only TSS used in our kernel so that the CPU can set up a known
 // kernel stack pointer (IST1) when jumping from normal context (both in ring 3 and ring 0) to
-// hardware-interrupt handling context (in ring 0). This TSS is pointed to be the TSS descriptor in
+// hardware-interrupt handling context (in ring 0). This TSS is pointed to by the TSS descriptor in
 // the GDT (last descriptor, loaded via ltr instruction in 64-bit mode). We use IST1 entry in the
 // Interrupt Stack Table to unconditionally switch to the interrupt handling stack on *all*
 // interrupts; see also idt_start struct below.
 tss_64bitmode:
-    .rept   1                           // currently only one CPU core supported
+    .rept   MAX_NUM_CPUS
 
     .long   0                           // reserved space
     .quad   0                           // RSP0, unused because all interrupts use IST1
     .quad   0                           // RSP1, unused because we don't use ring 1
     .quad   0                           // RSP2, unused because we don't use ring 2
     .quad   0                           // reserved space
-    .quad   _sys_interrupt_stack        // IST1, interrupt stack pointer 1, used for all interrupts
+    .quad   0                           // IST1, interrupt stack pointer 1, used for all interrupts
     .quad   0                           // IST2, interrupt stack pointer 2, unused
     .quad   0                           // IST3, interrupt stack pointer 3, unused
     .quad   0                           // IST4, interrupt stack pointer 4, unused
@@ -74,7 +76,7 @@ gdt_entry_user_cs:
     .long   0xffff, 0xcff300                    // 32-bit user data
     .long   0xffff, 0xaffb00                    // 64-bit user code
 tss_64bitmode_desc:
-    .rept   1                   // currently only one CPU core supported
+    .rept   MAX_NUM_CPUS
 
     .word   0                   // segment limit in bytes, bits 0-15 (will be filled in C)
     .word   0                   // segment base address, bits 0-15   (will be filled in C)
@@ -90,8 +92,3 @@ tss_64bitmode_desc:
 gdtr:
     .word   . - gdt_start - 1
     .quad   gdt_start
-
-    .bss
-    .align  0x10
-    .space  0x4000
-_sys_interrupt_stack:

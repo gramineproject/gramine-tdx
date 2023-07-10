@@ -140,6 +140,23 @@ struct virtio_console_config {
     uint32_t emerg_wr;     /* for early boot debugging, write-only, VIRTIO_CONSOLE_F_EMERG_WRITE */
 };
 
+/*
+ * Notes on multi-core synchronization:
+ *   - irq, size_activated, emerg_write_activated are unused
+ *   - rq_buf_pos used in RX handling and virtio_console_read(), sync via receive-side lock
+ *   - rq_buf is set at init, no sync required
+ *   - rq_notify_addr is set at init and used by CPU0-tied bottomhalves thread, no sync required
+ *   - shared_tq_buf_pos used in virtio_console_nprint(), sync via transmit-side lock
+ *   - tq_notify_addr is set at init, used in virtio_console_nprint(), sync via transmit-side lock
+ *   - shared_rq_buf is set at init, no sync required
+ *   - shared_tq_buf is set at init, no sync required
+ *   - rq is used by CPU0 interrupt handler and CPU0-tied bottomhalves thread, no sync required
+ *   - tq is used in virtio_console_nprint(), sync via transmit-side lock
+ *   - control_rq and control_tq are unused
+ *   - pci_regs is used only at init, no sync required
+ *   - pci_config is unused
+ *   - interrupt_status_reg is used by CPU0 interrupt handler, no sync required
+ */
 struct virtio_console {
     /* in private memory */
     uint32_t irq;               /* IRQ of this device, remapped to CPU interrupt by IOAPIC */
@@ -220,6 +237,19 @@ struct virtio_fs_config {
  * See examples in kernel_virtio_fs.c.
  */
 
+/*
+ * Notes on multi-core synchronization:
+ *   - irq is unused
+ *   - requests_notify_addr is set at init and used in virtio_fs_exec_request(), sync via lock
+ *   - device_done is used by CPU0 interrupt handler and in virtio_fs_exec_request(), sync via lock
+ *   - initialized is set at init, no sync required
+ *   - shared_buf is set at init, no sync required
+ *   - hiprio and notify are unused
+ *   - requests is used by CPU0 interrupt handler and in virtio_fs_exec_request(), sync via lock
+ *   - pci_regs is used only at init, no sync required
+ *   - pci_config is unused
+ *   - interrupt_status_reg is used by CPU0 interrupt handler, no sync required
+ */
 struct virtio_fs {
     /* in private memory */
     uint32_t irq;                   /* IRQ of this device, remapped to CPU interrupt by IOAPIC */
@@ -286,6 +316,28 @@ struct virtio_vsock_config {
     uint64_t guest_cid;
 };
 
+/*
+ * Notes on multi-core synchronization:
+ *   - irq is unused
+ *   - rq_notify_addr is set at init and used by CPU0-tied bottomhalves thread, no sync required
+ *   - tq_notify_addr is set at init and used in copy_into_tq(), sync via transmit-side lock
+ *   - host_cid is set at init, no sync required
+ *   - guest_cid is set at init, no sync required
+ *   - peer_fwd_cnt and peer_buffer_alloc are used by CPU0-tied bottomhalves thread during RX,
+ *     sync via receive-side lock
+ *   - fwd_cnt and msg_cnt are used during RX and TX, must be accessed via atomic ops
+ *   - buf_alloc is set at init, no sync required
+ *   - tx_cnt is used in copy_into_tq(), sync via transmit-side lock
+ *   - conns_size, conns, conns_by_host_port used in many places, sync via connections lock
+ *   - shared_rq_buf is set at init and used during RX, sync via receive-side lock
+ *   - shared_tq_buf is set at init and used in copy_into_tq(), sync via transmit-side lock
+ *   - rq is used during RX, sync via receive-side lock
+ *   - tq is used in copy_into_tq() and cleanup_tq(), sync via transmit-side lock
+ *   - eq is unused
+ *   - pci_regs is used only at init, no sync required
+ *   - pci_config is used only at init, no sync required
+ *   - interrupt_status_reg is used by CPU0 interrupt handler, no sync required
+ */
 struct virtio_vsock {
     /* in private memory */
     uint32_t irq;                   /* IRQ of this device, remapped to CPU interrupt by IOAPIC */

@@ -22,6 +22,8 @@ typedef struct {
     uint32_t  type;
 } __attribute__((packed)) e820_table_entry;
 
+extern uint64_t g_pml4_table_base;
+
 void* memory_get_shared_region(size_t size);
 int memory_free_shared_region(void* addr, size_t size);
 

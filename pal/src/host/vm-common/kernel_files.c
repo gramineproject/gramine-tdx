@@ -3,6 +3,10 @@
 
 /*
  * Glue code for common operations on files, using virtio-fs commands.
+ *
+ * Notes on multi-core synchronization:
+ *   - All functions are thread-safe (operate on args and locally allocated vars, plus use
+ *     thread-safe virtio_fs_fuse_*() operations)
  */
 
 #include <asm/fcntl.h>

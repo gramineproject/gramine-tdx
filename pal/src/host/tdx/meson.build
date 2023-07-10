@@ -35,6 +35,7 @@ pal_tdx_sources = files(
 libpal_tdx = executable('pal',
     pal_tdx_sources,
     pal_vm_common_sources,
+    pal_vm_common_tdx_sources,
     pal_vm_common_asm_offsets_h,
     pal_common_sources,
 

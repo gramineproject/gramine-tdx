@@ -21,6 +21,7 @@ enum thread_state {
     THREAD_STOPPED,
     THREAD_RUNNABLE,
     THREAD_BLOCKED,
+    THREAD_RUNNING,
 };
 
 struct thread_context {
@@ -67,7 +68,10 @@ DEFINE_LIST(thread);
 struct thread {
     LIST_TYPE(thread) list;
     enum thread_state state;
+    uint32_t thread_id; /* for debugging purposes */
     int* blocked_on;
+    int is_running; /* is currently running on any CPU; must be accessed atomically */
+    bool is_helper; /* is it an idle or bottomhalves thread */
 
     /* for context switching: GPRs + XSAVE area of a thread during kernel execution (when it
      * explicitly yields, i.e., we implement cooperative kernel scheduling) or during userland
@@ -81,8 +85,9 @@ DEFINE_LISTP(thread);
 void* thread_get_stack(void);
 noreturn void thread_free_stack_and_die(void* thread_stack, int* clear_child_tid);
 
+void thread_setup(struct thread* thread, void* fpregs, void* stack, int (*callback)(void*),
+                  const void* param);
+int thread_helper_create(int (*callback)(void*), struct thread** out_thread);
+
 noreturn int thread_idle_run(void* args);
 noreturn int thread_bottomhalves_run(void* args);
-
-extern struct thread* g_idle_thread;
-extern struct thread* g_bottomhalves_thread;

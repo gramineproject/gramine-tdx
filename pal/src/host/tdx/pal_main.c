@@ -25,8 +25,10 @@
 #include "external/fuse_kernel.h"
 #include "kernel_apic.h"
 #include "kernel_files.h"
+#include "kernel_hob.h"
 #include "kernel_interrupts.h"
 #include "kernel_memory.h"
+#include "kernel_multicore.h"
 #include "kernel_pci.h"
 #include "kernel_sched.h"
 #include "kernel_syscalls.h"
@@ -35,13 +37,10 @@
 #include "kernel_vmm_inputs.h"
 #include "kernel_xsave.h"
 #include "tdx_arch.h"
-#include "tdx_hob.h"
 
 uint64_t g_tsc_mhz;
 
 static struct pal_handle* g_first_thread_handle = NULL;
-static struct pal_handle* g_idle_thread_handle = NULL;
-static struct pal_handle* g_bottomhalves_thread_handle = NULL;
 
 static uint64_t g_shared_bit;
 
@@ -144,7 +143,7 @@ static int tdx_extend_rtmr2_with_manifest(const char* manifest, size_t manifest_
 
     long tdx_ret = tdx_tdcall_mr_rtmr_extend((uint64_t)&rtmr2_buffer, /*rtmr_index=*/2);
     if (tdx_ret)
-        return ret;
+        return -PAL_ERROR_DENIED;
 
     return 0;
 }
@@ -172,6 +171,24 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     /* initialize alloc_align as early as possible, a lot of PAL APIs depend on this being set */
     g_pal_public_state.alloc_align = PRESET_PAGESIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
+
+    uint8_t gpaw_unused;
+    uint64_t attributes_unused;
+    uint32_t max_cpus_unused;
+    bool sys_rd_available_unused;
+    uint32_t num_cpus;
+    uint32_t cpu_index;
+    long tdx_ret = tdx_tdcall_vp_info(&gpaw_unused, &attributes_unused, &num_cpus, &max_cpus_unused,
+                                      &cpu_index, &sys_rd_available_unused);
+    if (tdx_ret)
+        INIT_FAIL("Could not call TDCALL[TDG.VP.INFO]");
+
+    if (cpu_index != 0)
+        INIT_FAIL("Expected CPU with ID = 0 (BSP), but got ID = %u", cpu_index);
+
+    if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
+        INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
+                  MAX_NUM_CPUS);
 
     uint64_t gpa_width = 0;
     for (EFI_HOB_GENERIC_HEADER* hob = hob_addr; !END_OF_HOB_LIST(hob); hob = GET_NEXT_HOB(hob)) {
@@ -252,10 +269,19 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     if (ret < 0)
         INIT_FAIL("Failed to initialize system call handling");
 
+    /* must be called before interrupts_init() because it allocates interrupt stacks/XSAVE areas */
+    ret = init_multicore_prepare(num_cpus);
+    if (ret < 0)
+        INIT_FAIL("Failed to initialize multicore preparation (per-CPU data and stacks)");
+
     /* interrupts must be enabled (via `sti`) after all other parts of the kernel are initialized */
     ret = interrupts_init();
     if (ret < 0)
         INIT_FAIL("Failed to initialize interrupt/exception handling");
+
+    ret = init_multicore(num_cpus, hob_addr);
+    if (ret < 0)
+        INIT_FAIL("Failed to initialize multicore (BSP CPU couldn't init AP CPUs)");
 
     if (!g_console)
         INIT_FAIL("Failed to initialize virtio-console driver");
@@ -276,14 +302,6 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     ret = virtio_fs_fuse_init();
     if (ret < 0)
         INIT_FAIL("Failed FUSE_INIT request of virtio-fs driver");
-
-    ret = _PalThreadCreate(&g_idle_thread_handle, thread_idle_run, NULL);
-    if (ret < 0)
-        INIT_FAIL("Failed to create idle thread");
-
-    ret = _PalThreadCreate(&g_bottomhalves_thread_handle, thread_bottomhalves_run, NULL);
-    if (ret < 0)
-        INIT_FAIL("Failed to create bottomhalves thread");
 
     ret = _PalThreadCreate(&g_first_thread_handle, pal_start_continue, cmdline);
     if (ret < 0)

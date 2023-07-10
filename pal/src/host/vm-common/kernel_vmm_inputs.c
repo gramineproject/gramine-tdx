@@ -1,6 +1,14 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 /* Copyright (C) 2023 Intel Corporation */
 
+/*
+ * Inputs to Gramine from the host: command-line arguments, current working dir (PWD), current UNIX
+ * time. Inputs are acquired via QEMU's FW CFG interface.
+ *
+ * Notes on multi-core synchronization:
+ *   - All functions are called at init, no sync required
+ */
+
 #include <stdint.h>
 
 #include "api.h"

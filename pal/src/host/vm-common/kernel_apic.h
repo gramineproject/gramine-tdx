@@ -15,12 +15,18 @@
  * use reads/writes to MSRs (in contrast to xAPIC with its MMIO region). */
 #define MSR_INSECURE_IA32_LAPIC_SPURIOUS_INTERRUPT_VECTOR 0x80f
 #define MSR_INSECURE_IA32_LAPIC_LVT_TIMER                 0x832
-#define MSR_IA32_LAPIC_EOI                                0x80b
+
+#define MSR_IA32_APIC_BASE 0x1b
+#define MSR_IA32_LAPIC_ID  0x802
+#define MSR_IA32_LAPIC_EOI 0x80b
+#define MSR_IA32_LAPIC_ICR 0x830 /* Interrupt Command Register to send IPIs */
 
 /* Convenience MSR to specify at which TSC value to generate next timer interrupt */
 #define MSR_INSECURE_IA32_TSC_DEADLINE 0x000006E0
 
-void lapic_signal_interrupt_complete(void);
+void lapic_enable(void);
+int lapic_timer_init(void);
 void lapic_timer_rearm(void);
+void lapic_signal_interrupt_complete(void);
 
 int apic_init(void);

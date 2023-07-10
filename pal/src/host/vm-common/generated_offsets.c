@@ -2,6 +2,7 @@
 #include "pal.h"
 #include "pal_common.h"
 
+#include "kernel_multicore.h"
 #include "kernel_sched.h"
 #include "kernel_xsave.h"
 
@@ -10,9 +11,20 @@ const char* generated_offsets_name = "PAL_VM";
 const struct generated_offset generated_offsets[] = {
     DEFINE(VM_XSAVE_ALIGN, VM_XSAVE_ALIGN),
     DEFINE(MSR_IA32_GS_BASE, MSR_IA32_GS_BASE),
+    DEFINE(MSR_IA32_GS_KERNEL_BASE, MSR_IA32_GS_KERNEL_BASE),
+
+    /* multicore constants */
+    DEFINE(MAX_NUM_CPUS, MAX_NUM_CPUS),
+    DEFINE(AP_STARTUP_PAGE_ADDRESS, AP_STARTUP_PAGE_ADDRESS),
+    DEFINE(AP_STARTUP_PAGE_AP_LOCK, AP_STARTUP_PAGE_AP_LOCK),
+    DEFINE(AP_STARTUP_PAGE_C_FUNC, AP_STARTUP_PAGE_C_FUNC),
+    DEFINE(AP_STARTUP_PAGE_COUNTER, AP_STARTUP_PAGE_COUNTER),
+    DEFINE(AP_STARTUP_PAGE_PML4, AP_STARTUP_PAGE_PML4),
+    OFFSET(PER_CPU_DATA_XSAVE_AREA, per_cpu_data, interrupt_xsave_area),
 
     /* struct pal_tcb_vm */
     OFFSET(PAL_TCB_LIBOS, pal_tcb_vm, common.libos_tcb),
+    OFFSET(PAL_TCB_VM_THREAD_IS_RUNNING, pal_tcb_vm, kernel_thread.is_running),
     OFFSET(PAL_TCB_VM_USER_RIP, pal_tcb_vm, kernel_thread.context.user_rip),
 
     OFFSET(PAL_TCB_VM_CONTEXT_R8, pal_tcb_vm, kernel_thread.context.r8),

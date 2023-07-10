@@ -95,24 +95,22 @@ struct virtio_vsock_packet {
 };
 
 struct virtio_vsock_connection {
-    uint32_t fd; /* equals to UINT32_MAX if not attached to any fd */
+    uint32_t fd; /* UINT32_MAX if not attached to any fd; synced via g_vsock_connections_lock */
 
     enum virtio_vsock_state state;
 
+    int state_futex;
     int waiters; /* number of waiting threads; used as ad-hoc refcounting to defer free(conn) */
 
+    UT_hash_handle hh_host_port;
     uint64_t host_port;
     uint64_t guest_port;
+
     uint32_t pending_conn_fd; /* only for LISTENING state, equals to UINT32_MAX if no pending */
 
     struct virtio_vsock_packet* packets_for_user[VSOCK_MAX_PACKETS];
     uint32_t prepared_for_user;
     uint32_t consumed_by_user;
-
-    spinlock_t state_lock;
-    int state_futex;
-
-    UT_hash_handle hh_host_port;
 };
 
 struct sockaddr_vm {

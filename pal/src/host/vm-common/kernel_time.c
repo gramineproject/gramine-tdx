@@ -3,6 +3,11 @@
 
 /*
  * Functions for getting time (in us) and setting/triggering timeouts.
+ *
+ * Notes on multi-core synchronization:
+ *   - Timeout operations happen on different CPUs in both normal and interrupt-handling contexts,
+ *     sync via timeouts lock
+ *   - get_time_in_us()/delay() are thread-safe, don't use global mutable state, no sync required
  */
 
 #include <stdint.h>
@@ -46,6 +51,19 @@ int get_time_in_us(uint64_t* out_us) {
         return -PAL_ERROR_OVERFLOW;
 
     *out_us = us;
+    return 0;
+}
+
+int delay(uint64_t delay_us, bool* continue_gate) {
+    uint64_t curr_tsc = get_tsc();
+    uint64_t wait_until_tsc = curr_tsc + delay_us * g_tsc_mhz;
+
+    while (curr_tsc < wait_until_tsc) {
+        if (continue_gate && __atomic_load_n(continue_gate, __ATOMIC_ACQUIRE))
+            break;
+        CPU_RELAX();
+        curr_tsc = get_tsc();
+    }
     return 0;
 }
 
@@ -97,7 +115,8 @@ int notify_about_timeouts_uninterruptable(void) {
     if (ret < 0)
         return ret;
 
-    /* no need to grab g_pending_timeouts_list_lock: we are in non-interruptable ISR context */
+    /* no need to grab g_pending_timeouts_list_lock: we are in non-interruptable ISR context, and
+     * only CPU0 handles timeout interrupts */
     struct pending_timeout* timeout;
     struct pending_timeout* tmp;
     LISTP_FOR_EACH_ENTRY_SAFE(timeout, tmp, &g_pending_timeouts_list, list) {

@@ -12,6 +12,7 @@
 #include "pal_error.h"
 #include "pal_internal.h"
 
+#include "kernel_multicore.h"
 #include "kernel_sched.h"
 
 int pal_common_random_bits_read(void* buffer, size_t size) {
@@ -30,7 +31,8 @@ double pal_common_get_bogomips(void) {
 
 int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
     /*
-     * Hard-coded characteristics: single-core single-node CPU, 3 levels of cache.
+     * Hard-coded characteristics: single-node CPU, 3 levels of cache. Number of HW threads/cores is
+     * taken from g_num_cpus; CPU cores are represented as non-SMT (no hyper-threads).
      *
      * Note the `static` keyword -- all arrays are allocated in BSS.
      */
@@ -44,11 +46,11 @@ int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
         { .type = CACHE_TYPE_UNIFIED, .level = 3, .size = 12288 * 1024,
           .coherency_line_size = 64, .number_of_sets = 12288, .physical_line_partition = 1 },
     };
-    static struct pal_cpu_thread_info threads[1] = {
-        { .is_online = true, .core_id = 0, .ids_of_caches = {0, 1, 2, 3} },
+    static struct pal_cpu_thread_info threads[MAX_NUM_CPUS] = {
+        0 /* to be filled below */
     };
-    static struct pal_cpu_core_info cores[1] = {
-        { .socket_id = 0, .node_id = 0 },
+    static struct pal_cpu_core_info cores[MAX_NUM_CPUS] = {
+        0 /* to be filled below */
     };
     static struct pal_socket_info sockets[1] = {
         { .unused = 0 },
@@ -58,6 +60,18 @@ int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
     };
     static size_t distances[1] = { 10 };
 
+    for (size_t i = 0; i < g_num_cpus; i++) {
+        threads[i].is_online = true;
+        threads[i].core_id = i;
+        threads[i].ids_of_caches[0] = 0;
+        threads[i].ids_of_caches[1] = 1;
+        threads[i].ids_of_caches[2] = 2;
+        threads[i].ids_of_caches[3] = 3;
+
+        cores[i].socket_id = 0;
+        cores[i].node_id = 0;
+    }
+
     topo_info->caches = caches;
     topo_info->threads = threads;
     topo_info->cores = cores;
@@ -66,8 +80,8 @@ int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
     topo_info->numa_distance_matrix = distances;
 
     topo_info->caches_cnt = 4;
-    topo_info->threads_cnt = 1;
-    topo_info->cores_cnt = 1;
+    topo_info->threads_cnt = g_num_cpus;
+    topo_info->cores_cnt = g_num_cpus;
     topo_info->sockets_cnt = 1;
     topo_info->numa_nodes_cnt = 1;
     return 0;
