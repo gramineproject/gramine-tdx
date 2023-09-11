@@ -65,16 +65,16 @@ struct thread_irq_pseudo_stack {
 
 DEFINE_LIST(thread);
 struct thread {
-	LIST_TYPE(thread) list;
-	enum thread_state state;
-	int* blocked_on;
+    LIST_TYPE(thread) list;
+    enum thread_state state;
+    int* blocked_on;
 
     /* for context switching: GPRs + XSAVE area of a thread during kernel execution (when it
      * explicitly yields, i.e., we implement cooperative kernel scheduling) or during userland
      * execution (when it is interrupted by IRQ); XSAVE is always stored in a preallocated region */
-	struct thread_context context;
+    struct thread_context context;
 
-	struct thread_irq_pseudo_stack irq_pseudo_stack;
+    struct thread_irq_pseudo_stack irq_pseudo_stack;
 };
 DEFINE_LISTP(thread);
 

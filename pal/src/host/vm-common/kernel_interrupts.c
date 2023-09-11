@@ -109,15 +109,12 @@ void isr_c(struct isr_regs* regs) {
             ret = virtio_console_isr();
             if (ret < 0)
                 triple_fault();
-
             ret = virtio_fs_isr();
             if (ret < 0)
                 triple_fault();
-
             ret = virtio_vsock_isr();
             if (ret < 0)
                 triple_fault();
-
             lapic_signal_interrupt_complete();
             break;
         default:

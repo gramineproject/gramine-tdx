@@ -151,7 +151,7 @@ sysret_asm:
     //   RCX (4th arg):  memory that should be zeroed (signal to parent that child exited)
 save_context_and_restore_next:
     // note that r8, r9 and r10 are caller-saved regs, so we can overwrite them freely
-    mov     %rsi, %r8              // RSI (next_fs_base 2nd arg) may be clobbered by do_xsave
+    mov     %rsi, %r8              // RSI (next_gs_base 2nd arg) may be clobbered by do_xsave
     mov     %rdx, %r9              // RDX (lock_to_unlock 3rd arg) may be clobbered by do_xsave
     mov     %rcx, %r10             // RCX (clear_child_tid 4rd arg) may be clobbered by do_xsave
 
@@ -197,8 +197,8 @@ save_context_and_restore_next:
     movl    $0, (%r10)              // set *clear_child_tid = 0
 .Lskip_clear_child_tid:
 
-    mov     %r8, %rax               // low-order 32 bits of `next_fs_base`
-    mov     %r8, %rdx               // high-order 32 bits of `next_fs_base` (shifted-right below)
+    mov     %r8, %rax               // low-order 32 bits of `next_gs_base`
+    mov     %r8, %rdx               // high-order 32 bits of `next_gs_base` (shifted-right below)
     shr     $32, %rdx
     mov     $MSR_IA32_GS_BASE, %rcx
     wrmsr
