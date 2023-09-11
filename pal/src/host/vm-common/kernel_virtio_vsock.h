@@ -98,6 +98,9 @@ struct virtio_vsock_connection {
     uint32_t fd; /* equals to UINT32_MAX if not attached to any fd */
 
     enum virtio_vsock_state state;
+
+    int waiters; /* number of waiting threads; used as ad-hoc refcounting to defer free(conn) */
+
     uint64_t host_port;
     uint64_t guest_port;
     uint32_t pending_conn_fd; /* only for LISTENING state, equals to UINT32_MAX if no pending */

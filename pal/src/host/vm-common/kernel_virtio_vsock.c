@@ -31,6 +31,7 @@ struct virtio_vsock* g_vsock = NULL;
 bool g_vsock_trigger_bottomhalf = false;
 
 static int process_packet(struct virtio_vsock_packet* packet);
+static void remove_connection(struct virtio_vsock_connection* conn);
 
 /* interrupt handler (interrupt service routine), called by generic handler `isr_c()` */
 int virtio_vsock_isr(void) {
@@ -321,8 +322,16 @@ static void cleanup_connection(struct virtio_vsock_connection* conn) {
         free(conn->packets_for_user[conn->consumed_by_user % VSOCK_MAX_PACKETS]);
         conn->consumed_by_user++;
     }
+
     if (conn->host_port)
         host_port_delete(conn);
+
+    if (conn->pending_conn_fd != UINT32_MAX) {
+        /* there is a pending connection, and we clean up a connection that could accept it */
+        struct virtio_vsock_connection* pending_conn = get_connection(conn->pending_conn_fd);
+        if (pending_conn)
+            remove_connection(pending_conn);
+    }
 }
 
 static void reinit_connection(struct virtio_vsock_connection* conn) {
@@ -332,7 +341,7 @@ static void reinit_connection(struct virtio_vsock_connection* conn) {
 
 static struct virtio_vsock_connection* create_connection(uint64_t host_port, uint64_t guest_port,
                                                          enum virtio_vsock_state state) {
-    struct virtio_vsock_connection* conn = malloc(sizeof(*conn));
+    struct virtio_vsock_connection* conn = calloc(1, sizeof(*conn));
     if (!conn)
         return NULL;
 
@@ -349,8 +358,13 @@ static struct virtio_vsock_connection* create_connection(uint64_t host_port, uin
 
 static void remove_connection(struct virtio_vsock_connection* conn) {
     detach_connection(conn->fd);
-    cleanup_connection(conn);
-    free(conn);
+    if (!conn->waiters) {
+        /* no other threads are waiting on this connection, this thread is single owner of conn */
+        free(conn);
+    } else {
+        /* some threads are waiting on this connection, defer freeing and move to CLOSE state */
+        reinit_connection(conn);
+    }
 }
 
 static struct virtio_vsock_packet* generate_packet(struct virtio_vsock_connection* conn,
@@ -385,7 +399,7 @@ static struct virtio_vsock_packet* generate_packet(struct virtio_vsock_connectio
 }
 
 /* sends the RST response packet and frees the `in` packet */
-static int neglect_packet_and_free(struct virtio_vsock_packet* in) {
+static int neglect_packet(struct virtio_vsock_packet* in) {
     int ret;
     struct virtio_vsock_packet* packet = NULL;
 
@@ -419,7 +433,6 @@ static int neglect_packet_and_free(struct virtio_vsock_packet* in) {
     ret = copy_into_tq(packet);
 out:
     free(packet);
-    free(in);
     return ret;
 }
 
@@ -525,35 +538,43 @@ static int recv_rw_packet(struct virtio_vsock_connection* conn,
     return 0;
 }
 
-/* takes ownership of the packet and frees it in the end */
-static int process_packet(struct virtio_vsock_packet* packet) {
-    int ret;
-
+static int verify_packet(struct virtio_vsock_packet* packet) {
     if (packet->header.size > VSOCK_MAX_PAYLOAD_SIZE) {
         log_error("malicious size of packet (%u)", packet->header.size);
-        neglect_packet_and_free(packet);
         return -PAL_ERROR_DENIED;
     }
 
     if (packet->header.type != VIRTIO_VSOCK_TYPE_STREAM) {
         log_error("only stream type packets are supported in vsock");
-        neglect_packet_and_free(packet);
         return -PAL_ERROR_NOTSUPPORT;
     }
 
     if (packet->header.op == VIRTIO_VSOCK_OP_INVALID || packet->header.op >= VIRTIO_VSOCK_OP_MAX) {
         log_error("wrong operation (%d) on vsock packet is received", packet->header.op);
-        neglect_packet_and_free(packet);
         return -PAL_ERROR_NOTSUPPORT;
     }
 
     if (packet->header.dst_cid != g_vsock->guest_cid ||
             packet->header.src_cid != g_vsock->host_cid) {
         log_error("vsock packet guest/host CIDs do not match guest/host");
-        neglect_packet_and_free(packet);
         return -PAL_ERROR_INVAL;
     }
 
+    return 0;
+}
+
+/* takes ownership of the packet and frees it in the end */
+static int process_packet(struct virtio_vsock_packet* packet) {
+    int ret;
+
+    ret = verify_packet(packet);
+    if (ret < 0) {
+        neglect_packet(packet);
+        free(packet);
+        return ret;
+    }
+
+    bool packet_ownership_transferred = false;
     struct virtio_vsock_connection* conn = NULL;
 
     /* guest and host CIDs are set in stone, so it is enough to distinguish connections based on the
@@ -575,8 +596,14 @@ static int process_packet(struct virtio_vsock_packet* packet) {
     }
 
     if (!conn) {
-        neglect_packet_and_free(packet);
-        return -PAL_ERROR_INVAL;
+        ret = -PAL_ERROR_INVAL;
+        goto out;
+    }
+
+    if (packet->header.op == VIRTIO_VSOCK_OP_RST) {
+        reinit_connection(conn);
+        ret = -PAL_ERROR_DENIED;
+        goto out;
     }
 
     g_vsock->peer_fwd_cnt   = packet->header.fwd_cnt;
@@ -585,14 +612,14 @@ static int process_packet(struct virtio_vsock_packet* packet) {
     switch (conn->state) {
         case VIRTIO_VSOCK_LISTEN:
             if (packet->header.op != VIRTIO_VSOCK_OP_REQUEST) {
-                neglect_packet_and_free(packet);
-                return -PAL_ERROR_DENIED;
+                ret = -PAL_ERROR_DENIED;
+                goto out;
             }
             if (conn->pending_conn_fd != UINT32_MAX) {
                 /* there is already one pending connection on this listening socket */
                 log_warning("vsock backlog full, dropping connection");
-                neglect_packet_and_free(packet);
-                return -PAL_ERROR_NOMEM;
+                ret = -PAL_ERROR_NOMEM;
+                goto out;
             }
             /* create new connection */
             struct virtio_vsock_connection* new_conn = create_connection(packet->header.src_port,
@@ -600,79 +627,74 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                                                                          VIRTIO_VSOCK_ESTABLISHED);
             if (!new_conn) {
                 log_error("no memory for new connection");
-                neglect_packet_and_free(packet);
-                return -PAL_ERROR_NOMEM;
+                ret = -PAL_ERROR_NOMEM;
+                goto out;
             }
             ret = send_response_packet(new_conn);
             if (ret < 0) {
-                neglect_packet_and_free(packet);
                 remove_connection(new_conn);
-                return ret;
+                goto out;
             }
             /* unblock accept() syscall */
             conn->pending_conn_fd = new_conn->fd;
-            free(packet);
-            return 0;
+            ret = 0;
+            goto out;
 
         case VIRTIO_VSOCK_CONNECT:
-            if (packet->header.op == VIRTIO_VSOCK_OP_RST) {
-                free(packet);
-                remove_connection(conn);
-                return 0;
-            }
             if (packet->header.op != VIRTIO_VSOCK_OP_RESPONSE) {
-                neglect_packet_and_free(packet);
-                return -PAL_ERROR_DENIED;
+                ret = -PAL_ERROR_DENIED;
+                goto out;
             }
             conn->state = VIRTIO_VSOCK_ESTABLISHED;
             sched_thread_wakeup(&conn->state_futex);
-            free(packet);
-            return 0;
+            ret = 0;
+            goto out;
 
         case VIRTIO_VSOCK_ESTABLISHED:
             switch (packet->header.op) {
                 case VIRTIO_VSOCK_OP_RW:
-                    return recv_rw_packet(conn, packet);
+                    ret = recv_rw_packet(conn, packet);
+                    packet_ownership_transferred = ret < 0 ? false : true;
+                    goto out;
                 case VIRTIO_VSOCK_OP_CREDIT_REQUEST:
-                    free(packet);
-                    return send_credit_update_packet(conn);
+                    ret = send_credit_update_packet(conn);
+                    goto out;
                 case VIRTIO_VSOCK_OP_CREDIT_UPDATE:
                     /* we already updated peer_fwd_cnt and peer_buf_alloc above */
-                    free(packet);
-					return 0;
+                    ret = 0;
+                    goto out;
                 case VIRTIO_VSOCK_OP_SHUTDOWN:
                     /* FIXME: we do not look at packet.header.flags currently */
                     send_reset_packet(conn); /* notify host that we ack this shutdown cleanly */
-                    /* fallthrough */
-                case VIRTIO_VSOCK_OP_RST:
-                    free(packet);
-                    remove_connection(conn);
-                    return 0;
+                    reinit_connection(conn);
+                    ret = 0;
+                    goto out;
                 default:
-                    /* unknown operation */
-                    neglect_packet_and_free(packet);
-                    return -PAL_ERROR_DENIED;
+                    ret = -PAL_ERROR_DENIED;
+                    goto out;
             }
 
         case VIRTIO_VSOCK_CLOSING:
-            if (packet->header.op != VIRTIO_VSOCK_OP_RST &&
-                    packet->header.op != VIRTIO_VSOCK_OP_SHUTDOWN) {
-                neglect_packet_and_free(packet);
-                return -PAL_ERROR_DENIED;
+            if (packet->header.op != VIRTIO_VSOCK_OP_SHUTDOWN) {
+                ret = -PAL_ERROR_DENIED;
+                goto out;
             }
-            conn->state = VIRTIO_VSOCK_CLOSE;
-            sched_thread_wakeup(&conn->state_futex);
-            free(packet);
-            return 0;
+            reinit_connection(conn);
+            ret = 0;
+            goto out;
 
         case VIRTIO_VSOCK_CLOSE:
             /* all packets are wrong in this state */
-            neglect_packet_and_free(packet);
-            return -PAL_ERROR_DENIED;
+            ret = -PAL_ERROR_DENIED;
+            goto out;
     }
 
-    free(packet);
-    return -PAL_ERROR_DENIED;
+out:
+    if (ret < 0 && packet->header.op != VIRTIO_VSOCK_OP_RST)
+        neglect_packet(packet);
+    if (!packet_ownership_transferred)
+        free(packet);
+    return ret;
 }
 
 static int virtio_vsock_negotiate_features(struct virtio_vsock* vsock) {
@@ -1071,7 +1093,17 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
         }
 
         /* connection state not changed to ESTABLISHED, need to sleep */
+        conn->waiters++;
         sched_thread_wait(&conn->state_futex, &conn->state_lock);
+        conn->waiters--;
+
+        if (!conn->waiters && conn->state == VIRTIO_VSOCK_CLOSE) {
+            /* connection was closed while we were asleep, freeing was deferred, try now */
+            spinlock_unlock(&conn->state_lock);
+            remove_connection(conn);
+            ret = -PAL_ERROR_NOTCONNECTION;
+            goto out;
+        }
     }
 
     spinlock_unlock(&conn->state_lock);
@@ -1079,10 +1111,6 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
 out:
     if (timeout)
         deregister_timeout(timeout);
-
-    if (ret < 0)
-        reinit_connection(conn);
-
     return ret;
 }
 
@@ -1282,7 +1310,9 @@ int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
         }
 
         /* connection state not changed to CLOSE, need to sleep */
+        conn->waiters++;
         sched_thread_wait(&conn->state_futex, &conn->state_lock);
+        conn->waiters--;
     }
 
     spinlock_unlock(&conn->state_lock);
@@ -1290,7 +1320,6 @@ int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
 out:
     if (timeout)
         deregister_timeout(timeout);
-    reinit_connection(conn);
     return ret;
 }
 
