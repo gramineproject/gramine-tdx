@@ -88,6 +88,8 @@ int memory_mark_pages_present(uint64_t addr, size_t size, bool present) {
             *pte_addr |= 1UL;
         else
             *pte_addr &= ~1UL;
+
+        /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
         invlpg(mark_addr);
 
         mark_addr += 4096;
@@ -108,6 +110,8 @@ int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark) 
             *pte_addr |= 1UL << 4;
         else
             *pte_addr &= ~(1UL << 4);
+
+        /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
         invlpg(mark_addr);
 
         mark_addr += 4096;

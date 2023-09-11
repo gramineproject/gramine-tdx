@@ -2,7 +2,7 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 /*
- * TCP/UFP sockets, emulated through AF_VSOCK. Notes:
+ * TCP/UDP sockets, emulated through AF_VSOCK. Notes:
  *   - bound/connected IP addresses are dummy and emulated as localhost,
  *   - only the first iovec item is sent/received in send() and recv() callbacks,
  *   - UDP sockets are not really supported, they have no send() and recv() callbacks.
