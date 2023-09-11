@@ -363,13 +363,6 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
         return -PAL_ERROR_DENIED;
     }
 
-    /* lazy page allocation: clear the present bit to induce #PF (see also kernel_interrupts.c) */
-    if (g_enable_lazy_memory_alloc) {
-        ret = memory_mark_pages_present((uint64_t)addr, size, /*present=*/false);
-        if (ret < 0)
-            return ret;
-    }
-
     if (!handle->file.chunk_hashes) {
         /* case of allowed file */
         return emulate_file_map_via_read(handle->file.nodeid, handle->file.fh, addr, offset, size);

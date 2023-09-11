@@ -15,10 +15,6 @@
 /* Beginning of the page table hierarchy */
 static uint64_t g_pml4_table_base;
 
-/* Lazy memory allocation (when the page is zeroed out only on the first access to it) is enabled
- * after interrupts are enabled (because it relies on the #PF exception handler) */
-bool g_enable_lazy_memory_alloc = false;
-
 void* memory_get_shared_region(size_t size) {
 	/* trivial shared memory management: allocations in the shared-memory range
 	 * [SHARED_MEM_ADDR, SHARED_MEM_ADDR + SHARED_MEM_SIZE) are ever increasing */
@@ -324,14 +320,8 @@ int memory_alloc(void* addr, size_t size) {
         return -PAL_ERROR_DENIED;
     }
 
-    /* lazy page allocation: clear the present bit to induce #PF (see also kernel_interrupts.c) */
-    if (g_enable_lazy_memory_alloc) {
-        return memory_mark_pages_present((uint64_t)addr, size, /*present=*/false);
-    } else {
-        /* at boot time, when interrupts are not yet enabled, cannot use #PF so allocate now */
-        memset(addr, 0, size);
-        return 0;
-    }
+    memset(addr, 0, size);
+    return 0;
 }
 
 int memory_free(void* addr, size_t size) {
