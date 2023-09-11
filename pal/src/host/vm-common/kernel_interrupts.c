@@ -55,13 +55,8 @@ void isr_c(struct isr_regs* regs) {
     uint64_t kernel_cs = (uint64_t)(gdt_entry_kernel_cs - gdt_start);
 
     switch (regs->int_number) {
-        case 14:
-            /* Page faults can happen only because the page is not present (P bit is cleared in the
-             * corresponding PTE), see also PalVirtualMemoryAlloc() logic */
-            if ((regs->error_code & /*present bit*/1UL) != 0) {
-                log_error("Panic: #PF triggered on present page (flags 0x%lx)", regs->error_code);
-                triple_fault();
-            }
+        case 14: ;
+            /* below code is currently only for diagnostics; we always panic on PFs */
             uint64_t faulted_addr;
             __asm__ volatile("mov %%cr2, %%rax" : "=a"(faulted_addr));
             faulted_addr &= ~0xFFFUL;
@@ -73,18 +68,9 @@ void isr_c(struct isr_regs* regs) {
                 triple_fault();
             }
 
-            /* We use ignored-by-hardware bit 9 to signify "needs memset-to-zero", as a perf
-             * optimization. On VM boot (see kernel_memory.c), all memory pages are zeroed out so
-             * they don't need an additional memset-to-zero (and all PTEs have bit 9 equal to 0).
-             * We must also set the present bit (bit 0) always. */
-            if ((*pte_addr & (1UL << 9)) == 0) {
-                *pte_addr |= 1UL << 9 | 1UL;
-                invlpg(faulted_addr);
-            } else {
-                *pte_addr |= 1UL;
-                invlpg(faulted_addr);
-                memset((void*)faulted_addr, 0, 0x1000);
-            }
+            log_error("Panic: #PF on address 0x%lx (corresponding PTE %p)", faulted_addr, pte_addr);
+            log_error("       rip=0x%lx rsp=0x%lx rax=0x%lx", regs->rip, regs->rsp, regs->rax);
+            triple_fault();
             break;
         case 20:
             ret = vm_virtualization_exception(regs);
@@ -299,6 +285,5 @@ int interrupts_init(void) {
     ltr((char*)tss_64bitmode_desc - gdt_start);
     sti();
 
-    g_enable_lazy_memory_alloc = true;
     return 0;
 }

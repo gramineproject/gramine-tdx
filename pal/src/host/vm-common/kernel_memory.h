@@ -22,8 +22,6 @@ typedef struct {
     uint32_t  type;
 } __attribute__((packed)) e820_table_entry;
 
-extern bool g_enable_lazy_memory_alloc;
-
 void* memory_get_shared_region(size_t size);
 int memory_free_shared_region(void* addr, size_t size);
 
