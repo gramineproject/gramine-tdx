@@ -38,6 +38,7 @@ int pal_common_thread_create(struct pal_handle** handle, int (*callback)(void*),
     if (!thread_handle)
         return -PAL_ERROR_NOMEM;
 
+    /* fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
     assert(g_xsave_size);
     void* fpregs = malloc(g_xsave_size + VM_XSAVE_ALIGN);
     if (!fpregs) {
