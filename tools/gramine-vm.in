@@ -116,5 +116,7 @@ CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
         -fw_cfg name=opt/gramine/cmdline,string="$GRAMINE_ARGS" \
         -fw_cfg name=opt/gramine/unixtime_s,string="$EPOCHSECONDS")
 
-virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error --sandbox none &
+virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error \
+    --sandbox none --no-announce-submounts &
+
 exec env "${CMD[@]}"
