@@ -1331,7 +1331,11 @@ int virtio_vsock_close(int sockfd, uint64_t timeout_us) {
     if (!conn)
         return -PAL_ERROR_BADHANDLE;
 
-    int ret = virtio_vsock_shutdown(sockfd, VIRTIO_VSOCK_SHUTDOWN_COMPLETE, timeout_us);
+    int ret = 0;
+    if (conn->state != VIRTIO_VSOCK_CLOSE) {
+        ret = virtio_vsock_shutdown(sockfd, VIRTIO_VSOCK_SHUTDOWN_COMPLETE, timeout_us);
+    }
+
     remove_connection(conn);
     return ret;
 }
