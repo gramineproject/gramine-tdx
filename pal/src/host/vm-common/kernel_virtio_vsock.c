@@ -503,7 +503,7 @@ static struct virtio_vsock_packet* generate_packet(struct virtio_vsock_connectio
     packet->header.flags = flags;
 
     packet->header.buf_alloc = g_vsock->buf_alloc;
-    packet->header.fwd_cnt   = g_vsock->fwd_cnt;
+    packet->header.fwd_cnt   = __atomic_load_n(&g_vsock->fwd_cnt, __ATOMIC_ACQUIRE);
 
     packet->header.size = payload_size;
     memcpy(packet->payload, payload, payload_size);
@@ -541,7 +541,7 @@ static int neglect_packet(struct virtio_vsock_packet* in) {
     packet->header.flags = 0;
 
     packet->header.buf_alloc = g_vsock->buf_alloc;
-    packet->header.fwd_cnt   = g_vsock->fwd_cnt;
+    packet->header.fwd_cnt   = __atomic_load_n(&g_vsock->fwd_cnt, __ATOMIC_ACQUIRE);
 
     packet->header.size = 0;
 
@@ -666,8 +666,8 @@ static int recv_rw_packet(struct virtio_vsock_connection* conn,
     conn->packets_for_user[idx] = packet; /* packet is now owned by conn */
     conn->prepared_for_user++;
 
-    g_vsock->msg_cnt++;
-    g_vsock->fwd_cnt += packet->header.size;
+    __atomic_add_fetch(&g_vsock->msg_cnt, 1, __ATOMIC_ACQ_REL);
+    __atomic_add_fetch(&g_vsock->fwd_cnt, packet->header.size, __ATOMIC_ACQ_REL);
     return 0;
 }
 
