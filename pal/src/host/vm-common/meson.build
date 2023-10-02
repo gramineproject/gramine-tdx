@@ -21,6 +21,7 @@ pal_vm_common_sources = files(
     'kernel_vmm_inputs.c',
     'kernel_xsave.c',
     'pal_common_console.c',
+    'pal_common_eventfd.c',
     'pal_common_events.c',
     'pal_common_files.c',
     'pal_common_misc.c',

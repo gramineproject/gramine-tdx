@@ -89,6 +89,16 @@ int pal_common_pipe_delete(struct pal_handle* handle, enum pal_delete_mode delet
 int pal_common_pipe_attrquerybyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* attr);
 int pal_common_pipe_attrsetbyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* attr);
 
+int pal_common_eventfd_open(struct pal_handle** handle, const char* type, const char* uri,
+                            enum pal_access access, pal_share_flags_t share,
+                            enum pal_create_mode create, pal_stream_options_t options);
+int64_t pal_common_eventfd_read(struct pal_handle* handle, uint64_t offset, uint64_t len,
+                                void* buffer);
+int64_t pal_common_eventfd_write(struct pal_handle* handle, uint64_t offset, uint64_t len,
+                                 const void* buffer);
+void pal_common_eventfd_destroy(struct pal_handle* handle);
+int pal_common_eventfd_attrquerybyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* attr);
+
 int pal_common_socket_create(enum pal_socket_domain domain, enum pal_socket_type type,
                              pal_stream_options_t options, struct pal_handle** out_handle);
 
