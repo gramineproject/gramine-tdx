@@ -118,3 +118,13 @@ struct pal_handle_inner_event {
     int signaled;
     bool auto_clear;
 };
+
+struct pal_handle_inner_eventfd {
+    bool nonblocking;
+    bool semaphore;
+    spinlock_t lock; /* protects below fields */
+    uint64_t val;
+    int  writer_futex;
+    int  reader_futex;
+    bool poll_waiting; /* for PalStreamsWaitEvents; protected by lock */
+};
