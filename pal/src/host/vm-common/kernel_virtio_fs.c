@@ -118,16 +118,30 @@ out:
  * submit `count` chained descriptors, kick the device, wait until the device processed the request
  * and then copy contents from device's shared memory to secure memory */
 static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
-    int ret;
-
     /* no FUSE request has less that 3 descriptors (at least fuse_in, data_in, fuse_out) */
     assert(count >= 3);
+
+    int ret;
+    struct fuse_in_header* hdr_in = descs[0].addr;
 
     spinlock_lock(&g_fs_lock);
 
     for (size_t i = 0; i < count; i++) {
         /* reset for sanity */
         descs[i].allocated = false;
+    }
+
+    /* sanity check: FS requests can be issued only after a (single) FUSE_INIT request */
+    if (hdr_in->opcode == FUSE_INIT) {
+        if (g_fs->initialized) {
+            ret = -PAL_ERROR_DENIED;
+            goto out;
+        }
+    } else {
+        if (!g_fs->initialized) {
+            ret = -PAL_ERROR_DENIED;
+            goto out;
+        }
     }
 
     if (__atomic_load_n(&g_fs->device_done, __ATOMIC_ACQUIRE)) {
@@ -156,7 +170,6 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
     /* we spin on device_done (until it becomes true) to wait for the device notification */
     __atomic_store_n(&g_fs->device_done, false, __ATOMIC_RELEASE);
 
-    struct fuse_in_header* hdr_in = descs[0].addr;
     hdr_in->len = total_in_size;
 
     char* shared_buf_addr = g_fs->shared_buf;
@@ -222,8 +235,6 @@ out:
 int virtio_fs_fuse_init(void) {
     int ret;
 
-    assert(!g_fs->initialized);
-
     struct fuse_in_header  hdr_in   = { .opcode = FUSE_INIT };
     struct fuse_init_in    init_in  = { .major = FUSE_KERNEL_VERSION,
                                         .minor = FUSE_KERNEL_MINOR_VERSION};
@@ -261,7 +272,7 @@ int virtio_fs_fuse_init(void) {
 int virtio_fs_fuse_lookup(const char* filename, uint64_t* out_nodeid) {
     int ret;
 
-    if (!g_fs->initialized || strlen(filename) == 0)
+    if (strlen(filename) == 0)
         return -PAL_ERROR_DENIED;
 
     /* lookup is always started at root dir, so filename should be absolute */
@@ -306,9 +317,6 @@ int virtio_fs_fuse_lookup(const char* filename, uint64_t* out_nodeid) {
 int virtio_fs_fuse_readlink(uint64_t nodeid, uint64_t size, char* out_buf, uint64_t* out_size) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in  = { .opcode = FUSE_READLINK, .nodeid = nodeid };
     struct fuse_out_header hdr_out = {0};
 
@@ -349,9 +357,6 @@ out:
 int virtio_fs_fuse_open(uint64_t nodeid, uint32_t flags, uint64_t* out_fh) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_OPEN, .nodeid = nodeid };
     struct fuse_open_in    open_in   = { .flags = flags };
     struct fuse_out_header hdr_out   = {0};
@@ -388,9 +393,6 @@ int virtio_fs_fuse_create(uint64_t dir_nodeid, const char* filename, uint32_t fl
                           uint64_t* out_nodeid, uint64_t* out_fh) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_CREATE, .nodeid = dir_nodeid };
     struct fuse_create_in  create_in = { .flags = flags, .mode = mode,
                                          .umask = /*default permissive*/0022 };
@@ -424,9 +426,6 @@ int virtio_fs_fuse_create(uint64_t dir_nodeid, const char* filename, uint32_t fl
 int virtio_fs_fuse_release(uint64_t nodeid, uint64_t fh) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     /*
      * Notes on `fuse_release_in` flags:
      * - FUSE_RELEASE_FLUSH is not needed because Gramine performs explicit flush before close where
@@ -456,9 +455,6 @@ int virtio_fs_fuse_release(uint64_t nodeid, uint64_t fh) {
 int virtio_fs_fuse_unlink(uint64_t dir_nodeid, const char* filename) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_UNLINK, .nodeid = dir_nodeid };
     struct fuse_out_header hdr_out   = {0};
 
@@ -480,9 +476,6 @@ int virtio_fs_fuse_unlink(uint64_t dir_nodeid, const char* filename) {
 int virtio_fs_fuse_rename(uint64_t old_dir_nodeid, const char* old_filename,
                           uint64_t new_dir_nodeid, const char* new_filename) {
     int ret;
-
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
 
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_RENAME, .nodeid = old_dir_nodeid };
     struct fuse_rename_in  rename_in = { .newdir = new_dir_nodeid };
@@ -508,9 +501,6 @@ int virtio_fs_fuse_rename(uint64_t old_dir_nodeid, const char* old_filename,
 int virtio_fs_fuse_read(uint64_t nodeid, uint64_t fh, uint64_t size, uint64_t offset,
                         char* out_buf, uint64_t* out_size) {
     int ret;
-
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
 
     /* NOTE: we don't use any read flags (currently the only one is FUSE_READ_LOCKOWNER) */
     struct fuse_in_header  hdr_in  = { .opcode = FUSE_READ, .nodeid = nodeid };
@@ -553,9 +543,6 @@ int virtio_fs_fuse_write(uint64_t nodeid, uint64_t fh, const char* buf, uint64_t
                          uint64_t offset, uint64_t* out_size) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     /* NOTE: we don't use any write flags (search FUSE_WRITE_* for available flags) */
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_WRITE, .nodeid = nodeid };
     struct fuse_write_in   write_in  = { .fh = fh, .offset = offset, .size = size };
@@ -587,9 +574,6 @@ int virtio_fs_fuse_write(uint64_t nodeid, uint64_t fh, const char* buf, uint64_t
 int virtio_fs_fuse_flush(uint64_t nodeid, uint64_t fh) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in  = { .opcode = FUSE_FLUSH, .nodeid = nodeid };
     struct fuse_flush_in   flush_in = { .fh = fh };
     struct fuse_out_header hdr_out = {0};
@@ -613,9 +597,6 @@ int virtio_fs_fuse_flush(uint64_t nodeid, uint64_t fh) {
 int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags, uint64_t max_size,
                            struct fuse_attr* out_attr) {
     int ret;
-
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
 
     struct fuse_in_header  hdr_in     = { .opcode = FUSE_GETATTR, .nodeid = nodeid };
     struct fuse_getattr_in getattr_in = { .getattr_flags = flags, .fh = fh };
@@ -668,9 +649,6 @@ int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags, uint64_
 int virtio_fs_fuse_setattr(uint64_t nodeid, const struct fuse_setattr_in* setattr) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     /* the only currently used fields are `size` and `mode`, set on a file handle */
     if (setattr->valid != (FATTR_FH | FATTR_SIZE)
             && setattr->valid != (FATTR_FH | FATTR_MODE))
@@ -701,9 +679,6 @@ int virtio_fs_fuse_setattr(uint64_t nodeid, const struct fuse_setattr_in* setatt
 int virtio_fs_fuse_opendir(uint64_t nodeid, uint32_t flags, uint64_t* out_fh) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_OPENDIR, .nodeid = nodeid };
     struct fuse_open_in    open_in   = { .flags = flags };
     struct fuse_out_header hdr_out   = {0};
@@ -730,9 +705,6 @@ int virtio_fs_fuse_opendir(uint64_t nodeid, uint32_t flags, uint64_t* out_fh) {
 int virtio_fs_fuse_mkdir(uint64_t dir_nodeid, const char* dirname, uint32_t mode,
                          uint64_t* out_nodeid) {
     int ret;
-
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
 
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_MKDIR, .nodeid = dir_nodeid };
     struct fuse_mkdir_in   mkdir_in  = { .mode = mode, .umask = /*default permissive*/0022};
@@ -761,9 +733,6 @@ int virtio_fs_fuse_mkdir(uint64_t dir_nodeid, const char* dirname, uint32_t mode
 int virtio_fs_fuse_releasedir(uint64_t nodeid, uint64_t fh) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_RELEASEDIR, .nodeid = nodeid };
     struct fuse_release_in release_in  = { .fh = fh };
     struct fuse_out_header hdr_out     = {0};
@@ -786,9 +755,6 @@ int virtio_fs_fuse_releasedir(uint64_t nodeid, uint64_t fh) {
 int virtio_fs_fuse_rmdir(uint64_t dir_nodeid, const char* dirname) {
     int ret;
 
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
-
     struct fuse_in_header  hdr_in    = { .opcode = FUSE_RMDIR, .nodeid = dir_nodeid };
     struct fuse_out_header hdr_out   = {0};
 
@@ -810,9 +776,6 @@ int virtio_fs_fuse_rmdir(uint64_t dir_nodeid, const char* dirname) {
 int virtio_fs_fuse_readdir(uint64_t nodeid, uint64_t fh, uint64_t size, uint64_t offset,
                            struct fuse_dirent* out_dirents, uint64_t* out_size) {
     int ret;
-
-    if (!g_fs->initialized)
-        return -PAL_ERROR_DENIED;
 
     /* NOTE: we don't use any read flags (currently the only one is FUSE_READ_LOCKOWNER) */
     struct fuse_in_header  hdr_in  = { .opcode = FUSE_READDIR, .nodeid = nodeid };
