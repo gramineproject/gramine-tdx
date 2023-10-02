@@ -282,21 +282,11 @@ static int virtio_console_negotiate_features(struct virtio_console* console) {
     vm_mmio_writel(&pci_regs->device_feature_select, 0);
     advertised_features = vm_mmio_readl(&pci_regs->device_feature);
 
-    console->size_activated        = false;
-    console->emerg_write_activated = false;
-
-    if (advertised_features & (1 << VIRTIO_CONSOLE_F_SIZE)) {
-        understood_features |= 1 << VIRTIO_CONSOLE_F_SIZE;
-        console->size_activated = true;
-    }
-
-    if (advertised_features & (1 << VIRTIO_CONSOLE_F_MULTIPORT)) {
-        /* NOTE: we don't support multi-port, currently simply ignore */
-    }
-
-    if (advertised_features & (1 << VIRTIO_CONSOLE_F_EMERG_WRITE)) {
-        understood_features |= 1 << VIRTIO_CONSOLE_F_EMERG_WRITE;
-        console->emerg_write_activated = true;
+    if (advertised_features & (1 << VIRTIO_CONSOLE_F_SIZE)
+            || advertised_features & (1 << VIRTIO_CONSOLE_F_MULTIPORT)
+            || advertised_features & (1 << VIRTIO_CONSOLE_F_EMERG_WRITE)) {
+        /* NOTE: we don't support console size, multi-port, emergency writes;
+         *       currently simply ignore */
     }
 
     vm_mmio_writel(&pci_regs->driver_feature_select, 0);

@@ -142,7 +142,6 @@ struct virtio_console_config {
 
 /*
  * Notes on multi-core synchronization:
- *   - irq, size_activated, emerg_write_activated are unused
  *   - rq_buf_pos used in RX handling and virtio_console_read(), sync via receive-side lock
  *   - rq_buf is set at init, no sync required
  *   - rq_notify_addr is set at init and used by CPU0-tied bottomhalves thread, no sync required
@@ -159,10 +158,6 @@ struct virtio_console_config {
  */
 struct virtio_console {
     /* in private memory */
-    uint32_t irq;               /* IRQ of this device, remapped to CPU interrupt by IOAPIC */
-    bool size_activated;        /* if true, can read config->cols and config->rows */
-    bool emerg_write_activated; /* if true, can write config->emerg_wr */
-
     uint64_t rq_buf_pos;        /* current position (where to put incoming messages) in rq_buf */
     char* rq_buf;               /* private ring buffer where incoming messages are copied to */
     uint16_t* rq_notify_addr;   /* calculated MMIO notify addr for rq */
@@ -239,7 +234,6 @@ struct virtio_fs_config {
 
 /*
  * Notes on multi-core synchronization:
- *   - irq is unused
  *   - requests_notify_addr is set at init and used in virtio_fs_exec_request(), sync via lock
  *   - device_done is used by CPU0 interrupt handler and in virtio_fs_exec_request(), sync via lock
  *   - initialized is set at init, no sync required
@@ -252,7 +246,6 @@ struct virtio_fs_config {
  */
 struct virtio_fs {
     /* in private memory */
-    uint32_t irq;                   /* IRQ of this device, remapped to CPU interrupt by IOAPIC */
     uint16_t* requests_notify_addr; /* calculated MMIO notify addr for requests queue */
     bool device_done;               /* set on IRQ when device is ready with FUSE request */
 
@@ -318,7 +311,6 @@ struct virtio_vsock_config {
 
 /*
  * Notes on multi-core synchronization:
- *   - irq is unused
  *   - rq_notify_addr is set at init and used by CPU0-tied bottomhalves thread, no sync required
  *   - tq_notify_addr is set at init and used in copy_into_tq(), sync via transmit-side lock
  *   - host_cid is set at init, no sync required
@@ -340,7 +332,6 @@ struct virtio_vsock_config {
  */
 struct virtio_vsock {
     /* in private memory */
-    uint32_t irq;                   /* IRQ of this device, remapped to CPU interrupt by IOAPIC */
     uint16_t* rq_notify_addr;       /* calculated MMIO notify addr for RQ queue */
     uint16_t* tq_notify_addr;       /* calculated MMIO notify addr for TQ queue */
 
