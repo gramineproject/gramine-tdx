@@ -120,6 +120,26 @@ static int check_socket_handle(struct pal_handle* handle, pal_wait_flags_t event
     return 0;
 }
 
+static int check_eventfd_handle(struct pal_handle* handle, pal_wait_flags_t events,
+                                pal_wait_flags_t* out_events) {
+    assert(handle->hdr.type == PAL_TYPE_EVENTFD);
+
+    spinlock_lock(&handle->eventfd.lock);
+
+    pal_wait_flags_t revents = 0;
+    if ((events & PAL_WAIT_READ) && handle->eventfd.val) {
+        revents |= PAL_WAIT_READ;
+    }
+    if (events & PAL_WAIT_WRITE && handle->eventfd.val < UINT64_MAX - 1) {
+        revents |= PAL_WAIT_WRITE;
+    }
+
+    handle->eventfd.poll_waiting = (revents == 0);
+    *out_events = revents;
+    spinlock_unlock(&handle->eventfd.lock);
+    return 0;
+}
+
 static int check_handle(struct pal_handle* handle, pal_wait_flags_t events,
                         pal_wait_flags_t* out_events) {
     if (!handle) {
@@ -133,6 +153,8 @@ static int check_handle(struct pal_handle* handle, pal_wait_flags_t events,
         return check_pipe_handle(handle, events, out_events);
     } else if (handle->hdr.type == PAL_TYPE_SOCKET) {
         return check_socket_handle(handle, events, out_events);
+    } else if (handle->hdr.type == PAL_TYPE_EVENTFD) {
+        return check_eventfd_handle(handle, events, out_events);
     }
 
     /* cannot recognize this handle */
