@@ -356,20 +356,30 @@ static int pal_common_socket_attrsetbyhdl(struct pal_handle* handle, PAL_STREAM_
 }
 
 static int pal_common_tcp_send(struct pal_handle* handle, struct iovec* iov, size_t iov_len,
-                        size_t* out_size, struct pal_socket_addr* addr, bool force_nonblocking) {
+                               size_t* out_size, struct pal_socket_addr* addr,
+                               bool force_nonblocking) {
     __UNUSED(addr);
     assert(handle->hdr.type == PAL_TYPE_SOCKET);
 
     spinlock_lock(&handle->sock.lock);
 
-    __UNUSED(iov_len); /* FIXME: currently send only the first iovec item */
+    size_t total_bytes = 0;
+    size_t iov_idx = 0;
+    while (iov_idx < iov_len) {
+        if (!iov[iov_idx].iov_base || !iov[iov_idx].iov_len) {
+            iov_idx++;
+            continue;
+        }
 
-    int64_t bytes;
-    while (true) {
-        bytes = virtio_vsock_write(handle->sock.fd, iov[0].iov_base, iov[0].iov_len);
+        int64_t bytes = virtio_vsock_write(handle->sock.fd, iov[iov_idx].iov_base,
+                                           iov[iov_idx].iov_len);
         if (bytes < 0) {
             if (bytes == -PAL_ERROR_TRYAGAIN && !handle->sock.is_nonblocking
                     && !force_nonblocking) {
+                if (total_bytes) {
+                    /* don't wait more if we already sent at least something */
+                    goto out;
+                }
                 sched_thread_wait(&g_sockets_writer_futex, &handle->sock.lock);
                 continue;
             }
@@ -377,17 +387,27 @@ static int pal_common_tcp_send(struct pal_handle* handle, struct iovec* iov, siz
             return bytes;
         }
 
-        /* write succeeded */
-        break;
+        /* write succeeded, at least partially */
+        total_bytes += bytes;
+
+        if ((size_t)bytes < iov[iov_idx].iov_len) {
+            /* partial write, let's not try further; should be a rare condition */
+            goto out;
+        }
+
+        assert((size_t)bytes == iov[iov_idx].iov_len);
+        iov_idx++;
     }
 
+out:
     spinlock_unlock(&handle->sock.lock);
-    *out_size = bytes;
+    *out_size = total_bytes;
     return 0;
 }
 
 static int pal_common_udp_send(struct pal_handle* handle, struct iovec* iov, size_t iov_len,
-                        size_t* out_size, struct pal_socket_addr* addr, bool force_nonblocking) {
+                               size_t* out_size, struct pal_socket_addr* addr,
+                               bool force_nonblocking) {
     __UNUSED(handle);
     __UNUSED(iov);
     __UNUSED(iov_len);
@@ -398,21 +418,30 @@ static int pal_common_udp_send(struct pal_handle* handle, struct iovec* iov, siz
 }
 
 static int pal_common_tcp_recv(struct pal_handle* handle, struct iovec* iov, size_t iov_len,
-                        size_t* out_total_size, struct pal_socket_addr* addr,
-                        bool force_nonblocking) {
+                               size_t* out_total_size, struct pal_socket_addr* addr,
+                               bool force_nonblocking) {
     __UNUSED(addr);
     assert(handle->hdr.type == PAL_TYPE_SOCKET);
 
     spinlock_lock(&handle->sock.lock);
 
-    __UNUSED(iov_len); /* FIXME: currently recv only in the first iovec item */
+    size_t total_bytes = 0;
+    size_t iov_idx = 0;
+    while (iov_idx < iov_len) {
+        if (!iov[iov_idx].iov_base || !iov[iov_idx].iov_len) {
+            iov_idx++;
+            continue;
+        }
 
-    int64_t bytes;
-    while (true) {
-        bytes = virtio_vsock_read(handle->sock.fd, iov[0].iov_base, iov[0].iov_len);
+        int64_t bytes = virtio_vsock_read(handle->sock.fd, iov[iov_idx].iov_base,
+                                          iov[iov_idx].iov_len);
         if (bytes < 0) {
             if (bytes == -PAL_ERROR_TRYAGAIN && !handle->sock.is_nonblocking
                     && !force_nonblocking) {
+                if (total_bytes) {
+                    /* don't wait more if we already received at least something */
+                    goto out;
+                }
                 sched_thread_wait(&g_sockets_reader_futex, &handle->sock.lock);
                 continue;
             }
@@ -420,18 +449,27 @@ static int pal_common_tcp_recv(struct pal_handle* handle, struct iovec* iov, siz
             return bytes;
         }
 
-        /* read succeeded */
-        break;
+        /* read succeeded, at least partially */
+        total_bytes += bytes;
+
+        if ((size_t)bytes < iov[iov_idx].iov_len) {
+            /* partial read, let's not try further; should be a rare condition */
+            goto out;
+        }
+
+        assert((size_t)bytes == iov[iov_idx].iov_len);
+        iov_idx++;
     }
 
+out:
     spinlock_unlock(&handle->sock.lock);
-    *out_total_size = bytes;
+    *out_total_size = total_bytes;
     return 0;
 }
 
 static int pal_common_udp_recv(struct pal_handle* handle, struct iovec* iov, size_t iov_len,
-                        size_t* out_total_size, struct pal_socket_addr* addr,
-                        bool force_nonblocking) {
+                               size_t* out_total_size, struct pal_socket_addr* addr,
+                               bool force_nonblocking) {
     __UNUSED(handle);
     __UNUSED(iov);
     __UNUSED(iov_len);
