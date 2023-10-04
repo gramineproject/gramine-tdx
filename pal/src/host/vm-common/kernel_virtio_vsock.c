@@ -1351,26 +1351,30 @@ long virtio_vsock_peek(int sockfd) {
 
     struct virtio_vsock_connection* conn = get_connection(sockfd);
     if (!conn) {
-        ret = -PAL_ERROR_BADHANDLE;
-        goto out;
+        spinlock_unlock(&g_vsock_connections_lock);
+        return -PAL_ERROR_BADHANDLE;
     }
 
-    if (conn->state == VIRTIO_VSOCK_LISTEN) {
-        ret = conn->pending_conn_fd == UINT32_MAX ? 0 : 1;
-        goto out;
-    } else if (conn->state == VIRTIO_VSOCK_ESTABLISHED) {
-        size_t peeked = 0;
-        uint32_t peek_at = conn->consumed_by_user;
-        while (conn->prepared_for_user != peek_at) {
-            peeked += conn->packets_for_user[peek_at % VSOCK_MAX_PACKETS]->header.size;
-            peek_at++;
+    switch (conn->state) {
+        case VIRTIO_VSOCK_LISTEN:
+            ret = conn->pending_conn_fd == UINT32_MAX ? 0 : 1;
+            break;
+        case VIRTIO_VSOCK_ESTABLISHED: {
+            size_t peeked = 0;
+            uint32_t peek_at = conn->consumed_by_user;
+            while (conn->prepared_for_user != peek_at) {
+                peeked += conn->packets_for_user[peek_at % VSOCK_MAX_PACKETS]->header.size;
+                peek_at++;
+            }
+            ret = (long)peeked;
+            break;
         }
-        ret = (long)peeked;
-        goto out;
+        default:
+            /* CONNECT, CLOSE or CLOSING states -- connection is not active, so nothing pending */
+            ret = 0;
+            break;
     }
 
-    ret = -PAL_ERROR_INVAL;
-out:
     spinlock_unlock(&g_vsock_connections_lock);
     return ret;
 }
