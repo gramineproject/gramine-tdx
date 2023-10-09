@@ -17,6 +17,12 @@
 #define VSOCK_MAX_PACKETS     32   /* circular buffer, so must be a power of 2 */
 #define VSOCK_STARTING_PORT   1000 /* start port numbering from 1000, for no particular reason */
 
+/* Maximum length to which the queue of pending connections may grow. Our queue of pending
+ * connections is a simple static array, so we set a small number -- same as was in Linux before
+ * v5.4 (after v5.4, Linux has 4096 by default). Since the array is circular, this macro must be a
+ * power of 2. */
+#define VSOCK_MAX_PENDING_CONNS 128
+
 /* initial size of g_vsock->conns array */
 #define VIRTIO_VSOCK_CONNS_INIT_SIZE 4
 
@@ -106,7 +112,10 @@ struct virtio_vsock_connection {
     uint64_t host_port;
     uint64_t guest_port;
 
-    uint32_t pending_conn_fd; /* only for LISTENING state, equals to UINT32_MAX if no pending */
+    /* only for LISTENING state, pending_conn_fd[i] equals to UINT32_MAX if no pending */
+    uint32_t pending_conn_fds[VSOCK_MAX_PENDING_CONNS];
+    uint32_t pending_conn_fds_cnt;
+    uint32_t pending_conn_fds_idx; /* first received-but-not-yet-accepted pending conn */
 
     struct virtio_vsock_packet* packets_for_user[VSOCK_MAX_PACKETS];
     uint32_t prepared_for_user;
