@@ -4,7 +4,6 @@
 /*
  * TCP/UDP sockets, emulated through AF_VSOCK. Notes:
  *   - bound/connected IP addresses are dummy and emulated as localhost,
- *   - only the first iovec item is sent/received in send() and recv() callbacks,
  *   - UDP sockets are not really supported, they have no send() and recv() callbacks.
  */
 
@@ -384,7 +383,7 @@ static int pal_common_tcp_send(struct pal_handle* handle, struct iovec* iov, siz
                 continue;
             }
             spinlock_unlock(&handle->sock.lock);
-            return bytes;
+            return (bytes == -PAL_ERROR_TRYAGAIN && total_bytes) ? (int64_t)total_bytes : bytes;
         }
 
         /* write succeeded, at least partially */
@@ -446,7 +445,7 @@ static int pal_common_tcp_recv(struct pal_handle* handle, struct iovec* iov, siz
                 continue;
             }
             spinlock_unlock(&handle->sock.lock);
-            return bytes;
+            return (bytes == -PAL_ERROR_TRYAGAIN && total_bytes) ? (int64_t)total_bytes : bytes;
         }
 
         /* read succeeded, at least partially */
