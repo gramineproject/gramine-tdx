@@ -378,6 +378,7 @@ int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen);
 
 int virtio_vsock_isr(void);
 int virtio_vsock_bottomhalf(void);
+bool virtio_vsock_can_write(void);
 int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_config* pci_config,
                       uint64_t notify_off_addr, uint32_t notify_off_multiplier,
                       uint32_t* interrupt_status_reg);

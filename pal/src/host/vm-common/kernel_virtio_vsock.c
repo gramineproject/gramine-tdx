@@ -289,6 +289,13 @@ fail:
     return ret;
 }
 
+bool virtio_vsock_can_write(void) {
+    spinlock_lock(&g_vsock_transmit_lock);
+    bool can_write = (g_vsock && g_vsock->tq->free_desc != g_vsock->tq->queue_size);
+    spinlock_unlock(&g_vsock_transmit_lock);
+    return can_write;
+}
+
 /* called from the bottomhalf thread in normal context (not interrupt context) */
 int virtio_vsock_bottomhalf(void) {
     int ret = handle_rq();
