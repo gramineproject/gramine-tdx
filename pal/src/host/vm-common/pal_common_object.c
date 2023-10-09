@@ -111,8 +111,8 @@ static int check_socket_handle(struct pal_handle* handle, pal_wait_flags_t event
     }
 
     if (events & PAL_WAIT_WRITE) {
-        /* simplification: assume that TCP stream can always be written to */
-        revents |= PAL_WAIT_WRITE;
+        if (virtio_vsock_can_write())
+            revents |= PAL_WAIT_WRITE;
     }
 
     *out_events = revents;
