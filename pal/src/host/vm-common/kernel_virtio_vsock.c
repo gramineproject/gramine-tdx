@@ -423,7 +423,8 @@ static void init_connection(struct virtio_vsock_connection* conn, uint64_t host_
     conn->host_port  = host_port;
     conn->guest_port = guest_port;
 
-    conn->pending_conn_fd = UINT32_MAX;
+    conn->pending_conn_fds_cnt = 0;
+    conn->pending_conn_fds_idx = 0;
 
     conn->prepared_for_user = 0;
     conn->consumed_by_user  = 0;
@@ -440,9 +441,10 @@ static void cleanup_connection(struct virtio_vsock_connection* conn) {
     if (conn->host_port)
         host_port_delete(conn);
 
-    if (conn->pending_conn_fd != UINT32_MAX) {
-        /* there is a pending connection, and we clean up a connection that could accept it */
-        struct virtio_vsock_connection* pending_conn = get_connection(conn->pending_conn_fd);
+    for (uint32_t i = 0; i < conn->pending_conn_fds_cnt; i++) {
+        /* there may be pending connections, and we clean up a connection that could accept them */
+        uint32_t idx = (conn->pending_conn_fds_idx + i) % VSOCK_MAX_PENDING_CONNS;
+        struct virtio_vsock_connection* pending_conn = get_connection(conn->pending_conn_fds[idx]);
         if (pending_conn)
             remove_connection(pending_conn);
     }
@@ -761,10 +763,9 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                 ret = -PAL_ERROR_DENIED;
                 goto out;
             }
-            if (conn->pending_conn_fd != UINT32_MAX) {
-                /* there is already one pending connection on this listening socket */
+            if (conn->pending_conn_fds_cnt == VSOCK_MAX_PENDING_CONNS) {
                 log_warning("vsock backlog full, dropping connection");
-                ret = -PAL_ERROR_NOMEM;
+                ret = -PAL_ERROR_OVERFLOW;
                 goto out;
             }
             /* create new connection */
@@ -782,7 +783,9 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                 goto out;
             }
             /* unblock accept() syscall */
-            conn->pending_conn_fd = new_conn->fd;
+            uint32_t idx = conn->pending_conn_fds_idx + conn->pending_conn_fds_cnt;
+            conn->pending_conn_fds[idx % VSOCK_MAX_PENDING_CONNS] = new_conn->fd;
+            conn->pending_conn_fds_cnt++;
             ret = 0;
             goto out;
 
@@ -1168,7 +1171,9 @@ int virtio_vsock_listen(int sockfd, int backlog) {
     }
 
     conn->state = VIRTIO_VSOCK_LISTEN;
-    conn->pending_conn_fd = UINT32_MAX;
+    conn->pending_conn_fds_cnt = 0;
+    conn->pending_conn_fds_idx = 0;
+
     ret = 0;
 out:
     spinlock_unlock(&g_vsock_connections_lock);
@@ -1197,13 +1202,14 @@ int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen) {
         goto out;
     }
 
-    if (conn->pending_conn_fd == UINT32_MAX) {
+    if (conn->pending_conn_fds_cnt == 0) {
         /* non-blocking caller must return TRYAGAIN; blocking caller must sleep on this */
         ret = -PAL_ERROR_TRYAGAIN;
         goto out;
     }
 
-    uint32_t accepted_conn_fd = conn->pending_conn_fd;
+    uint32_t idx = conn->pending_conn_fds_idx % VSOCK_MAX_PENDING_CONNS;
+    uint32_t accepted_conn_fd = conn->pending_conn_fds[idx];
     struct virtio_vsock_connection* accepted_conn = get_connection(accepted_conn_fd);
     if (!accepted_conn) {
         ret = -PAL_ERROR_DENIED;
@@ -1217,7 +1223,9 @@ int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen) {
     addr_vm->svm_cid = g_vsock->host_cid;
     addr_vm->svm_port = accepted_conn->host_port;
 
-    conn->pending_conn_fd = UINT32_MAX;
+    conn->pending_conn_fds_idx++;
+    conn->pending_conn_fds_cnt--;
+
     ret = accepted_conn_fd;
 out:
     spinlock_unlock(&g_vsock_connections_lock);
@@ -1364,7 +1372,7 @@ long virtio_vsock_peek(int sockfd) {
 
     switch (conn->state) {
         case VIRTIO_VSOCK_LISTEN:
-            ret = conn->pending_conn_fd == UINT32_MAX ? 0 : 1;
+            ret = conn->pending_conn_fds_cnt;
             break;
         case VIRTIO_VSOCK_ESTABLISHED: {
             size_t peeked = 0;
