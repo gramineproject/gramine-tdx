@@ -70,7 +70,6 @@ struct thread {
     enum thread_state state;
     uint32_t thread_id; /* for debugging purposes */
     int* blocked_on;
-    int is_running; /* is currently running on any CPU; must be accessed atomically */
     bool is_helper; /* is it an idle or bottomhalves thread */
 
     /* for context switching: GPRs + XSAVE area of a thread during kernel execution (when it

@@ -148,17 +148,26 @@ sysret_asm:
 
 
     // void save_context_and_restore_next(uint64_t curr_gs_base, uint64_t next_gs_base,
-    //                                    uint32_t* lock_to_unlock, int* clear_child_tid)
+    //                                    uint32_t* lock_to_unlock, int* clear_child_tid,
+    //                                    uint32_t* critical_section_lock_to_unlock,
+    //                                    void* scheduling_stack)
     //
     //   RDI (1st arg):  current context (= GS register base), may be 0x0
     //   RSI (2nd arg):  next context (= next GS register base), always exists
     //   RDX (3rd arg):  lock that was taken and needs to be released
     //   RCX (4th arg):  memory that should be zeroed (signal to parent that child exited)
+    //   R8  (5th arg):  lock of the critical section that ends here, needs to be released
+    //   R9  (6th arg):  temporary stack on which to put this func's local variables and pop rflags
 save_context_and_restore_next:
-    // note that r8, r9 and r10 are caller-saved regs, so we can overwrite them freely
-    mov     %rsi, %r8              // RSI (next_gs_base 2nd arg) may be clobbered by do_xsave
-    mov     %rdx, %r9              // RDX (lock_to_unlock 3rd arg) may be clobbered by do_xsave
-    mov     %rcx, %r10             // RCX (clear_child_tid 4rd arg) may be clobbered by do_xsave
+    // note that r10 and r11 are caller-saved regs, so we can overwrite them freely
+
+    // Store the original RFLAGS of the context as the very first operation, because later
+    // operations (e.g. `test` instruction below) modify RFLAGS; this may be not needed if there is
+    // no current context, but in that case we'll only clobber RAX which is benign.
+    // We are possibly modifying the prev-thread stack, but we are under the
+    // critical_section_lock_to_unlock() lock so this stack can't be raced on by another CPU.
+    pushf
+    pop     %rax
 
     test    %rdi, %rdi             // no curr_gs_base -- no context to save
     jz      .Lrestore_next_context
@@ -181,38 +190,56 @@ save_context_and_restore_next:
     mov     %rcx, %gs:PAL_TCB_VM_CONTEXT_RCX
     mov     %rsp, %gs:PAL_TCB_VM_CONTEXT_RSP
 
+    // RAX contains current-context original RFLAGS; mark interrupts as enabled in the restored
+    // context, this is because current context may be executed under `spinlock_lock_disable_irq()`
+    or      $(1 << 9), %rax
+    mov     %rax, %gs:PAL_TCB_VM_CONTEXT_RFLAGS
+
     lea     .Lrestore_saved_context(%rip), %rax
     mov     %rax, %gs:PAL_TCB_VM_CONTEXT_RIP
 
-    pushf
-    pop     %rax
-    mov     %rax, %gs:PAL_TCB_VM_CONTEXT_RFLAGS
-
+    // RDX (function arg `lock_to_unlock`) may be clobbered by do_xsave, so save on stack
+    push    %rdx
     mov     %gs:PAL_TCB_VM_CONTEXT_FPREGS, %rdi
     callq   do_xsave
-
-    // after current context is completely saved, may mark the thread as not running anymore
-    // (we cannot do it earlier because then the old thread context would be restored)
-    movl    $0, %gs:PAL_TCB_VM_THREAD_IS_RUNNING
+    pop     %rdx
 
 .Lrestore_next_context:
-    cmp     $0, %r9                 // check if lock_to_unlock != NULL
-    je      .Lskip_spinlock_unlock
-    movl    $0, (%r9)               // spinlock_unlock(lock_to_unlock)
-.Lskip_spinlock_unlock:
-
-    cmp     $0, %r10                // check if clear_child_tid != NULL
-    je      .Lskip_clear_child_tid
-    movl    $0, (%r10)              // set *clear_child_tid = 0
-.Lskip_clear_child_tid:
-
-    mov     %r8, %rax               // low-order 32 bits of `next_gs_base`
-    mov     %r8, %rdx               // high-order 32 bits of `next_gs_base` (shifted-right below)
+    push    %rdx
+    push    %rcx
+    mov     %rsi, %rax              // low-order 32 bits of `next_gs_base`
+    mov     %rsi, %rdx              // high-order 32 bits of `next_gs_base` (shifted-right below)
     shr     $32, %rdx
     mov     $MSR_IA32_GS_BASE, %rcx
     wrmsr
+    pop     %rcx
+    pop     %rdx
 
-    movl    $1, %gs:PAL_TCB_VM_THREAD_IS_RUNNING
+    cmp     $0, %rdx                // check if lock_to_unlock != NULL
+    je      .Lskip_spinlock_unlock
+    movl    $0, (%rdx)              // spinlock_unlock(lock_to_unlock)
+.Lskip_spinlock_unlock:
+
+    cmp     $0, %rcx                // check if clear_child_tid != NULL
+    je      .Lskip_clear_child_tid
+    movl    $0, (%rcx)              // set *clear_child_tid = 0
+.Lskip_clear_child_tid:
+
+    // Before we leave the critical section, need to shift to a temporary "scheduling" stack,
+    // otherwise the operations below could modify the prev-thread stack and have a data race with
+    // some CPU that simultaneously scheduled this thread and also modifies the stack.
+    // The above is irrelevant if we currently execute in the interrupt handling context because
+    // then we're operating on the interrupt stack which is per-CPU and cannot be preempted, thus no
+    // data race on the interrupt stack is possible. (In this case, scheduling_stack = NULL.)
+    cmp     $0, %r9                 // check if scheduling_stack != NULL
+    je      .Lskip_setting_scheduling_stack
+    mov     %r9, %rsp             // set this temporary scheduling stack
+.Lskip_setting_scheduling_stack:
+
+    // Now we are completely done with both previously running thread and next thread, can unlock
+    // the critical section (typically `g_thread_list_lock`). Note that interrupts are re-enabled
+    // (if that was the state of the restoring thread) during popfq below.
+    movl    $0, (%r8)              // spinlock_unlock(critical_section_lock_to_unlock)
 
     mov     %gs:PAL_TCB_VM_CONTEXT_FPREGS, %rdi
     callq   do_xrstor
