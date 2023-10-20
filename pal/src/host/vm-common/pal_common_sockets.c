@@ -373,17 +373,23 @@ static int pal_common_tcp_send(struct pal_handle* handle, struct iovec* iov, siz
         int64_t bytes = virtio_vsock_write(handle->sock.fd, iov[iov_idx].iov_base,
                                            iov[iov_idx].iov_len);
         if (bytes < 0) {
-            if (bytes == -PAL_ERROR_TRYAGAIN && !handle->sock.is_nonblocking
-                    && !force_nonblocking) {
-                if (total_bytes) {
-                    /* don't wait more if we already sent at least something */
-                    goto out;
-                }
+            if (bytes != -PAL_ERROR_TRYAGAIN) {
+                /* unrecoverable error, fail immediately */
+                spinlock_unlock(&handle->sock.lock);
+                return bytes;
+            }
+            if (total_bytes) {
+                /* don't wait/error out if sent something; consider this call successful */
+                goto out;
+            }
+            if (!handle->sock.is_nonblocking && !force_nonblocking) {
+                /* blocking socket that didn't send anything must wait */
                 sched_thread_wait(&g_sockets_writer_futex, &handle->sock.lock);
                 continue;
             }
+            /* non-blocking socket that didn't send anything must error out with TRYAGAIN */
             spinlock_unlock(&handle->sock.lock);
-            return (bytes == -PAL_ERROR_TRYAGAIN && total_bytes) ? (int64_t)total_bytes : bytes;
+            return -PAL_ERROR_TRYAGAIN;
         }
 
         /* write succeeded, at least partially */
@@ -435,17 +441,23 @@ static int pal_common_tcp_recv(struct pal_handle* handle, struct iovec* iov, siz
         int64_t bytes = virtio_vsock_read(handle->sock.fd, iov[iov_idx].iov_base,
                                           iov[iov_idx].iov_len);
         if (bytes < 0) {
-            if (bytes == -PAL_ERROR_TRYAGAIN && !handle->sock.is_nonblocking
-                    && !force_nonblocking) {
-                if (total_bytes) {
-                    /* don't wait more if we already received at least something */
-                    goto out;
-                }
+            if (bytes != -PAL_ERROR_TRYAGAIN) {
+                /* unrecoverable error, fail immediately */
+                spinlock_unlock(&handle->sock.lock);
+                return bytes;
+            }
+            if (total_bytes) {
+                /* don't wait/error out if received something; consider this call successful */
+                goto out;
+            }
+            if (!handle->sock.is_nonblocking && !force_nonblocking) {
+                /* blocking socket that didn't receive anything must wait */
                 sched_thread_wait(&g_sockets_reader_futex, &handle->sock.lock);
                 continue;
             }
+            /* non-blocking socket that didn't receive anything must error out with TRYAGAIN */
             spinlock_unlock(&handle->sock.lock);
-            return (bytes == -PAL_ERROR_TRYAGAIN && total_bytes) ? (int64_t)total_bytes : bytes;
+            return -PAL_ERROR_TRYAGAIN;
         }
 
         /* read succeeded, at least partially */

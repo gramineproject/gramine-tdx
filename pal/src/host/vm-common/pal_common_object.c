@@ -100,20 +100,20 @@ static int check_socket_handle(struct pal_handle* handle, pal_wait_flags_t event
 
     spinlock_lock(&handle->sock.lock);
 
-    if (events & PAL_WAIT_READ) {
-        long peeked = virtio_vsock_peek(handle->sock.fd);
-        if (peeked < 0) {
-            spinlock_unlock(&handle->sock.lock);
-            return peeked;
-        }
-        if (peeked)
-            revents |= PAL_WAIT_READ;
+    long peeked = virtio_vsock_peek(handle->sock.fd);
+    if (peeked < 0) {
+        /* socket is invalid or was shutdown or in the process of closing */
+        handle->flags |= PAL_HANDLE_FD_ERROR;
+        *out_events = PAL_WAIT_ERROR;
+        spinlock_unlock(&handle->sock.lock);
+        return 0;
     }
 
-    if (events & PAL_WAIT_WRITE) {
-        if (virtio_vsock_can_write())
-            revents |= PAL_WAIT_WRITE;
-    }
+    if ((events & PAL_WAIT_READ) && peeked)
+        revents |= PAL_WAIT_READ;
+
+    if ((events & PAL_WAIT_WRITE) && virtio_vsock_can_write())
+        revents |= PAL_WAIT_WRITE;
 
     *out_events = revents;
     spinlock_unlock(&handle->sock.lock);
