@@ -20,7 +20,9 @@
 /* below functions are located in kernel_events.S */
 noreturn void isr_iret_to_userland(void);
 int save_context_and_restore_next(uint64_t curr_gs_base, uint64_t next_gs_base,
-                                  uint32_t* lock_to_unlock, int* clear_child_tid);
+                                  uint32_t* lock_to_unlock, int* clear_child_tid,
+                                  uint32_t* critical_section_lock_to_unlock,
+                                  void* scheduling_stack);
 
 static LISTP_TYPE(thread) g_thread_list = LISTP_INIT;
 
@@ -44,7 +46,9 @@ static void save_userland_context(struct thread* curr_thread, struct isr_regs* u
     if (!curr_thread)
         return;
 
-    /* FIXME: should also save FSBASE? It should be in isr_regs I think. */
+    /* we don't save the FS register because Gramine doesn't use/modify it; only the app uses and
+     * modifies it, and so we can just rely that curr_thread->context.user_fsbase is not affected
+     * during these context save/restore */
 
     memcpy(curr_thread->context.fpregs, userland_regs->fpregs, g_xsave_size);
 
@@ -88,8 +92,7 @@ static struct thread* find_next_thread(struct thread* curr_thread) {
 
     struct thread* thread;
     LISTP_FOR_EACH_ENTRY(thread, &g_thread_list, list) {
-        if (thread->state == THREAD_RUNNABLE &&
-                __atomic_load_n(&thread->is_running, __ATOMIC_ACQUIRE) == 0) {
+        if (thread->state == THREAD_RUNNABLE) {
             if (!next_thread) {
                 /* found first runnable thread, mark it as to-be-run next */
                 next_thread = thread;
@@ -104,12 +107,14 @@ static struct thread* find_next_thread(struct thread* curr_thread) {
     if (!next_thread && get_per_cpu_data()->cpu_id == 0) {
         /* CPU0 must periodically handle incoming events (network packets, stdin) */
         assert(get_per_cpu_data()->bottomhalves_thread);
+        assert(get_per_cpu_data()->bottomhalves_thread->state != THREAD_BLOCKED);
         next_thread = get_per_cpu_data()->bottomhalves_thread;
     }
 
     if (!next_thread) {
         /* absolutely no tasks to do */
         assert(get_per_cpu_data()->idle_thread);
+        assert(get_per_cpu_data()->idle_thread->state != THREAD_BLOCKED);
         next_thread = get_per_cpu_data()->idle_thread;
     }
 
@@ -120,24 +125,15 @@ void sched_thread_uninterruptable(struct isr_regs* userland_regs) {
     uint64_t curr_gs_base = rdmsr(MSR_IA32_GS_BASE);
     struct thread* curr_thread = curr_gs_base ? get_thread_ptr(curr_gs_base) : NULL;
 
-    spinlock_lock(&g_thread_list_lock);
+    spinlock_lock(&g_thread_list_lock); /* will be unlocked during save_context */
     struct thread* next_thread = find_next_thread(curr_thread);
     if (curr_thread && curr_thread->state == THREAD_RUNNING)
         curr_thread->state = THREAD_RUNNABLE;
     next_thread->state = THREAD_RUNNING;
-    spinlock_unlock(&g_thread_list_lock);
-
-#if 0
-    if (next_thread != curr_thread) {
-        log_always("--- sched_thread_un on cpu_id %u\t: thread %u (%s) replaced with %u",
-                   get_per_cpu_data()->cpu_id, curr_thread ? curr_thread->thread_id : 0,
-                   curr_thread ? (curr_thread->is_helper ? "help" : "norm") : "none",
-                   next_thread->thread_id);
-    }
-#endif
 
     if (next_thread == curr_thread) {
         /* re-scheduled the same thread, no need to save/restore context */
+        spinlock_unlock(&g_thread_list_lock);
         return;
     }
 
@@ -147,38 +143,28 @@ void sched_thread_uninterruptable(struct isr_regs* userland_regs) {
      * userland context and rewire RIP to point to a special "return via iret" assembly. */
     save_userland_context(curr_thread, userland_regs);
 
-    __atomic_store_n(&curr_thread->is_running, 0, __ATOMIC_RELEASE);
-
     /* it is cumbersome to restore FSBASE in asm, so restore explicitly here */
     wrmsr(MSR_IA32_FS_BASE, next_thread->context.user_fsbase);
 
     uint64_t next_gs_base = (uint64_t)get_gs_base(next_thread);
     save_context_and_restore_next(/*curr_gs_base=*/0x0, next_gs_base, /*lock_to_unlock=*/NULL,
-                                  /*clear_child_tid=*/NULL);
+                                  /*clear_child_tid=*/NULL, &g_thread_list_lock.lock,
+                                  /*scheduling_stack=*/NULL);
 }
 
 void sched_thread(uint32_t* lock_to_unlock, int* clear_child_tid) {
     uint64_t curr_gs_base = rdmsr(MSR_IA32_GS_BASE);
     struct thread* curr_thread = curr_gs_base ? get_thread_ptr(curr_gs_base) : NULL;
 
-    spinlock_lock_disable_irq(&g_thread_list_lock);
+    spinlock_lock_disable_irq(&g_thread_list_lock); /* will be unlocked during save_context */
     struct thread* next_thread = find_next_thread(curr_thread);
     if (curr_thread && curr_thread->state == THREAD_RUNNING)
         curr_thread->state = THREAD_RUNNABLE;
     next_thread->state = THREAD_RUNNING;
-    spinlock_unlock_enable_irq(&g_thread_list_lock);
-
-#if 0
-    if (next_thread != curr_thread) {
-        log_always("--- sched_thread on cpu_id %u\t: thread %u (%s) replaced with %u",
-                   get_per_cpu_data()->cpu_id, curr_thread ? curr_thread->thread_id : 0,
-                   curr_thread ? (curr_thread->is_helper ? "help" : "norm") : "none",
-                   next_thread->thread_id);
-    }
-#endif
 
     if (next_thread == curr_thread) {
         /* re-scheduled the same thread, no need to save/restore context */
+        spinlock_unlock_enable_irq(&g_thread_list_lock);
         return;
     }
 
@@ -186,7 +172,8 @@ void sched_thread(uint32_t* lock_to_unlock, int* clear_child_tid) {
     wrmsr(MSR_IA32_FS_BASE, next_thread->context.user_fsbase);
 
     uint64_t next_gs_base = (uint64_t)get_gs_base(next_thread);
-    save_context_and_restore_next(curr_gs_base, next_gs_base, lock_to_unlock, clear_child_tid);
+    save_context_and_restore_next(curr_gs_base, next_gs_base, lock_to_unlock, clear_child_tid,
+                                  &g_thread_list_lock.lock, get_per_cpu_data()->scheduling_stack);
 }
 
 void sched_thread_wait(int* futex_word, spinlock_t* lock) {
@@ -195,7 +182,7 @@ void sched_thread_wait(int* futex_word, spinlock_t* lock) {
 
     /* this order of locks is required to guarantee that we won't miss any wakeup on this futex word
      * (recall that each wakeup grabs g_thread_list_lock) */
-    spinlock_lock_disable_irq(&g_thread_list_lock);
+    spinlock_lock_disable_irq(&g_thread_list_lock); /* will be unlocked during save_context */
     spinlock_unlock(lock);
 
     uint64_t curr_gs_base = rdmsr(MSR_IA32_GS_BASE);
@@ -204,9 +191,17 @@ void sched_thread_wait(int* futex_word, spinlock_t* lock) {
     curr_thread->state      = THREAD_BLOCKED;
     curr_thread->blocked_on = futex_word;
 
-    spinlock_unlock_enable_irq(&g_thread_list_lock);
+    struct thread* next_thread = find_next_thread(curr_thread);
+    next_thread->state = THREAD_RUNNING;
 
-    sched_thread(/*lock_to_unlock=*/NULL, /*clear_child_tid=*/NULL);
+    assert(next_thread != curr_thread);
+
+    wrmsr(MSR_IA32_FS_BASE, next_thread->context.user_fsbase);
+
+    uint64_t next_gs_base = (uint64_t)get_gs_base(next_thread);
+    save_context_and_restore_next(curr_gs_base, next_gs_base, /*lock_to_unlock=*/NULL,
+                                  /*clear_child_tid=*/NULL, &g_thread_list_lock.lock,
+                                  get_per_cpu_data()->scheduling_stack);
 
     /* now this thread is scheduled back, it means that it was unblocked via wakeup */
     spinlock_lock(lock);
@@ -255,6 +250,5 @@ void sched_thread_remove(struct thread* thread) {
     LISTP_DEL(thread, &g_thread_list, list);
     thread->state = THREAD_STOPPED;
     thread->blocked_on = NULL;
-    __atomic_store_n(&thread->is_running, 0, __ATOMIC_RELEASE);
     spinlock_unlock_enable_irq(&g_thread_list_lock);
 }

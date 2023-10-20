@@ -114,7 +114,6 @@ void thread_setup(struct thread* thread, void* fpregs, void* stack, int (*callba
 
     thread->state = THREAD_RUNNABLE;
     thread->blocked_on = NULL;
-    thread->is_running = 0;
 
     __atomic_store_n(&g_kick_sched_thread, true, __ATOMIC_RELEASE);
 }
