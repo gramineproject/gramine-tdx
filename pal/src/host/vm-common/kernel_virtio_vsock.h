@@ -12,22 +12,38 @@
 #include "uthash.h"
 
 #define AF_VSOCK 40
+#define VSOCK_HOST_CID 2
 
-#define VSOCK_HOST_CID        2
-#define VSOCK_MAX_PACKETS     32   /* circular buffer, so must be a power of 2 */
-#define VSOCK_STARTING_PORT   1000 /* start port numbering from 1000, for no particular reason */
+#define VSOCK_STARTING_PORT 1000 /* start port numbering from 1000, for no particular reason */
 
-/* Maximum length to which the queue of pending connections may grow. Our queue of pending
- * connections is a simple static array, so we set a small number -- same as was in Linux before
- * v5.4 (after v5.4, Linux has 4096 by default). Since the array is circular, this macro must be a
- * power of 2. */
-#define VSOCK_MAX_PENDING_CONNS 128
-
-/* initial size of g_vsock->conns array */
+/* Initial size of g_vsock->conns array. */
 #define VIRTIO_VSOCK_CONNS_INIT_SIZE 4
 
-/* for simplicity, each packet has statically allocated buffer for recv/send data */
-#define VSOCK_MAX_PAYLOAD_SIZE 16U /* FIXME: this small size is for testing, actually want ~4K */
+/* Maximum length to which the queue of pending connections may grow. Our queue of pending
+ * connections is a simple static array, so we choose a small number (note that Linux v5.4 has 4096
+ * by default). The corresponding array is a circular buffer, so this macro must be a power of 2. */
+#define VSOCK_MAX_PENDING_CONNS 256
+
+/* Max number of packets stored per connection. The corresponding array is a circular buffer, so
+ * this macro must be a power of 2. */
+#define VSOCK_MAX_PACKETS 256
+
+/* For simplicity, each packet has statically allocated buffer for recv/send data. We choose the
+ * size such that the total vsock packet size (44B header + payload) is a power of 2. The total
+ * send/recv buffer size becomes then 1024 * 256 = 262144, which corresponds to the default Linux
+ * buffer size. */
+#define VSOCK_MAX_PAYLOAD_SIZE 980U
+
+/* Sizes of RX and TX virtio queues. */
+#define VIRTIO_VSOCK_QUEUE_SIZE 256
+
+/* Size of the Event virtio queue (currently unused). */
+#define VIRTIO_VSOCK_EVENT_QUEUE_SIZE 32
+
+/* TX queue may be full, so it is impossible to immediately send a reply to some control message
+ * (e.g. RESPONSE to REQUEST). Since such control messages are not visible to the higher-level
+ * interfaces, we cannot ask the callers to retry (like we do with RW messages). */
+#define VIRTIO_VSOCK_PENDING_TQ_CONTROL_SIZE 4096
 
 /* On Linux, initial SYNs for an active TCP connection attempt will be retransmitted 6 times by
  * default. For example, with the current initial RTO (Retransmission Timeout) of 1s, the retries
@@ -104,16 +120,14 @@ struct virtio_vsock_connection {
     uint32_t fd; /* UINT32_MAX if not attached to any fd; synced via g_vsock_connections_lock */
 
     enum virtio_vsock_state state;
-
     int state_futex;
-    int waiters; /* number of waiting threads; used as ad-hoc refcounting to defer free(conn) */
 
     UT_hash_handle hh_host_port;
     uint64_t host_port;
     uint64_t guest_port;
 
-    /* only for LISTENING state, pending_conn_fd[i] equals to UINT32_MAX if no pending */
-    uint32_t pending_conn_fds[VSOCK_MAX_PENDING_CONNS];
+    /* allocated and used only in LISTENING state */
+    uint32_t* pending_conn_fds;
     uint32_t pending_conn_fds_cnt;
     uint32_t pending_conn_fds_idx; /* first received-but-not-yet-accepted pending conn */
 
