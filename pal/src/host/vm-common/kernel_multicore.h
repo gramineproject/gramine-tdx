@@ -12,6 +12,8 @@
 
 #define MAX_NUM_CPUS 256
 
+#define SCHEDULING_STACK_SIZE    128     /* temp stack used by save_context_and_restore_next() */
+
 #define AP_STARTUP_PAGE_ADDRESS 0x8000UL /* copy AP asm startup code to 32K address */
 #define AP_STARTUP_PAGE_SIZE    0x1000UL /* asm startup code must fit into 4K */
 
@@ -39,10 +41,12 @@ struct per_cpu_data {
     void*    interrupt_stack;      /* start address of the stack used for interrupts */
     void*    interrupt_xsave_area; /* start address of the XSAVE save area used for interrupts */
 
+    void* scheduling_stack;        /* temporary stack used in save_context_and_restore_next() */
+
     struct thread* idle_thread;         /* each CPU has its own idle thread */
     struct thread* bottomhalves_thread; /* only CPU0 has a bottomhalves thread currently */
 
-    uint8_t  reserved[24];
+    uint8_t  reserved[16];
 } __attribute__((packed));
 static_assert(sizeof(struct per_cpu_data) == 64, "incorrect struct size");
 
