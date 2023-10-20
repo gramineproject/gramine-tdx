@@ -30,7 +30,7 @@ struct pending_timeout {
 DEFINE_LISTP(pending_timeout);
 
 /* List of pending timeouts; wait-with-timeout events add themselves to this list, and
- * notify_about_timeouts() callback for timer interrupt walks through this list */
+ * notify_about_timeouts_uninterruptable() callback for timer interrupt walks through this list */
 static LISTP_TYPE(pending_timeout) g_pending_timeouts_list = LISTP_INIT;
 static spinlock_t g_pending_timeouts_list_lock = INIT_SPINLOCK_UNLOCKED;
 
@@ -79,8 +79,8 @@ int register_timeout(uint64_t timeout_absolute_us, int* futex, void** timeout_ou
     timeout->timeout_absolute_us = timeout_absolute_us;
     timeout->futex = futex;
 
-    /* g_pending_timeouts_list is used by interrupt-handler's notify_about_timeouts();
-     * temporarily disable interrupts to avoid deadlock */
+    /* g_pending_timeouts_list is used by interrupt-handler's
+     * notify_about_timeouts_uninterruptable(); temporarily disable interrupts to avoid deadlock */
     spinlock_lock_disable_irq(&g_pending_timeouts_list_lock);
     LISTP_ADD(timeout, &g_pending_timeouts_list, list);
     spinlock_unlock_enable_irq(&g_pending_timeouts_list_lock);
@@ -92,8 +92,8 @@ int register_timeout(uint64_t timeout_absolute_us, int* futex, void** timeout_ou
 void deregister_timeout(void* _timeout) {
     struct pending_timeout* timeout = (struct pending_timeout*)_timeout;
 
-    /* g_pending_timeouts_list is used by interrupt-handler's notify_about_timeouts();
-     * temporarily disable interrupts to avoid deadlock */
+    /* g_pending_timeouts_list is used by interrupt-handler's
+     * notify_about_timeouts_uninterruptable(); temporarily disable interrupts to avoid deadlock */
     spinlock_lock_disable_irq(&g_pending_timeouts_list_lock);
     struct pending_timeout* list_timeout;
     struct pending_timeout* tmp;
@@ -115,8 +115,10 @@ int notify_about_timeouts_uninterruptable(void) {
     if (ret < 0)
         return ret;
 
-    /* no need to grab g_pending_timeouts_list_lock: we are in non-interruptable ISR context, and
-     * only CPU0 handles timeout interrupts */
+    /* even though we are in non-interruptable ISR context on CPU0, still need to grab
+     * g_pending_timeouts_list_lock because normal-context threads on other CPUs may call
+     * register_timeout() and deregister_timeout() */
+    spinlock_lock(&g_pending_timeouts_list_lock);
     struct pending_timeout* timeout;
     struct pending_timeout* tmp;
     LISTP_FOR_EACH_ENTRY_SAFE(timeout, tmp, &g_pending_timeouts_list, list) {
@@ -125,6 +127,7 @@ int notify_about_timeouts_uninterruptable(void) {
             LISTP_DEL(timeout, &g_pending_timeouts_list, list);
         }
     }
+    spinlock_unlock(&g_pending_timeouts_list_lock);
     return 0;
 }
 
