@@ -134,6 +134,13 @@ struct virtio_vsock_connection {
     struct virtio_vsock_packet* packets_for_user[VSOCK_MAX_PACKETS];
     uint32_t prepared_for_user;
     uint32_t consumed_by_user;
+
+    /* below three fields needed to correctly support dualstack (only IPv4, only IPv6 or both);
+     * note that all packets will actually be received/sent on only one of the dualstack sockets
+     * (the first of the sockets to be bound to the same port) */
+    bool ipv4_bound;
+    bool ipv6_bound;
+    bool ipv6_v6only;
 };
 
 struct sockaddr_vm {
