@@ -68,7 +68,8 @@ static void vm_to_pal_sockaddr(enum pal_socket_domain domain, const struct socka
             pal_addr->ipv6.scope_id = 0;
             pal_addr->ipv6.port = htons((uint16_t)vm_addr->svm_port);
 
-            uint16_t ipv6_localhost_addr[8] = {0, 0, 0, 0, 0, 0, 0, 1};
+            uint8_t ipv6_localhost_addr[16] = {0, 0, 0, 0, 0, 0, 0, 0,
+                                               0, 0, 0, 0, 0, 0, 0, 1};
             memcpy(pal_addr->ipv6.addr, ipv6_localhost_addr, sizeof(pal_addr->ipv6.addr));
             break;
         case PAL_DISCONNECT:
