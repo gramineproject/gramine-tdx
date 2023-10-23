@@ -369,7 +369,8 @@ struct virtio_vsock {
 };
 
 int virtio_vsock_socket(int domain, int type, int protocol);
-int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* out_new_port);
+int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* out_new_port,
+                      bool is_ipv4, bool ipv6_v6only);
 int virtio_vsock_listen(int sockfd, int backlog);
 int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen);
 int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t timeout_us);
