@@ -1145,7 +1145,8 @@ out:
     return ret;
 }
 
-int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* out_new_port) {
+int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* out_new_port,
+                      bool is_ipv4, bool ipv6_v6only) {
     int ret;
 
     if (!addr || addrlen < sizeof(struct sockaddr_vm))
@@ -1181,10 +1182,24 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
          * is a slow O(n) implementation but such ops should be rare */
         for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
             struct virtio_vsock_connection* check_conn = g_vsock->conns[i];
-            if (check_conn && check_conn->guest_port == bind_to_port) {
-                ret = -PAL_ERROR_STREAMEXIST;
-                goto out;
+            if (!check_conn || check_conn->guest_port != bind_to_port)
+                continue;
+
+            /* allow dualstack (ipv4 & ipv6) connections, if not explicitly requested otherwise;
+             * it's enough if only one socket is marked as dualstack (`ipv6_v6only = false`) */
+            if (!ipv6_v6only || !check_conn->ipv6_v6only) {
+                if (is_ipv4 && !check_conn->ipv4_bound) {
+                    assert(check_conn->ipv6_bound);
+                    continue;
+                }
+                else if (!is_ipv4 && !check_conn->ipv6_bound) {
+                    assert(check_conn->ipv4_bound);
+                    continue;
+                }
             }
+
+            ret = -PAL_ERROR_STREAMEXIST;
+            goto out;
         }
     }
 
@@ -1193,6 +1208,16 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
 
     conn->guest_port = bind_to_port;
     conn->host_port  = 0;
+
+    conn->ipv6_v6only = ipv6_v6only;
+    if (is_ipv4) {
+        assert(conn->ipv4_bound == false);
+        conn->ipv4_bound = true;
+    } else {
+        assert(conn->ipv6_bound == false);
+        conn->ipv6_bound = true;
+    }
+
     ret = 0;
 out:
     spinlock_unlock(&g_vsock_connections_lock);
