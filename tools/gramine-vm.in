@@ -111,14 +111,26 @@ QEMU_VIRTIO_FS="-chardev socket,path=/tmp/vhostfs,id=vhostfs \
                 -device vhost-user-fs-pci,iommu_platform=off,queue-size=1024,chardev=vhostfs,tag=graminefs"
 QEMU_VIRTIO_VSOCK="-device vhost-vsock-pci,iommu_platform=off,guest-cid=10,id=vsockdev"
 
-GRAMINE_ARGS="-gramine init \"$APPLICATION\" $@ -gramine-end"
+# Due to QEMU syntax, commas in the QEMU cmdline need to be escaped using an additional comma.
+APPLICATION=${APPLICATION//","/",,"}
+GRAMINE_ARGS="-gramine-args init \"$APPLICATION\" $@ -gramine-args-end"
+
+GRAMINE_ENVS=$(python3 -c "
+import os
+env_str = ''
+for name, value in os.environ.items():
+    env_str += ('\"{0}={1}\" '.format(name, value).replace(',', ',,'))
+print(env_str)
+")
+GRAMINE_ENVS="-gramine-envs $GRAMINE_ENVS -gramine-envs-end"
 
 CMD=("${ENVS[@]}")
 CMD+=("${PREFIX[@]}")
 CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
         $QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK $QEMU_BINARIES \
         -fw_cfg name=opt/gramine/pwd,string="$PWD" \
-        -fw_cfg name=opt/gramine/cmdline,string="$GRAMINE_ARGS" \
+        -fw_cfg name=opt/gramine/args,string="$GRAMINE_ARGS" \
+        -fw_cfg name=opt/gramine/envs,string="$GRAMINE_ENVS" \
         -fw_cfg name=opt/gramine/unixtime_s,string="$EPOCHSECONDS")
 
 virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error \
