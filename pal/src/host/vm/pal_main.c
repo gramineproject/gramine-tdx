@@ -244,12 +244,16 @@ noreturn void pal_start_c(void) {
     if (!g_fs)
         INIT_FAIL("Failed to initialize virtio-fs driver");
 
-    /* read VMM (untrusted) inputs: gramine args and host's PWD from fw_cfg QEMU pseudo-device,
-     * see also kernel_vmm_inputs.h */
+    /* read VMM (untrusted) inputs: gramine args, environment variables and host's PWD from fw_cfg
+     * QEMU pseudo-device, see also kernel_vmm_inputs.h */
     char cmdline[512] = {0};
-    ret = cmdline_init(cmdline, sizeof(cmdline));
+    ret = cmdline_init_args(cmdline, sizeof(cmdline));
     if (ret < 0)
         INIT_FAIL("Can't read command line from VMM");
+
+    ret = cmdline_init_envs(g_envs, sizeof(g_envs));
+    if (ret < 0)
+        INIT_FAIL("Can't read envinronment variables from VMM");
 
     ret = host_pwd_init();
     if (ret < 0)
@@ -280,12 +284,18 @@ noreturn int pal_start_continue(void* cmdline_) {
 
     /* allocate as global variables in case we overwrite the current stack */
     static int argc = 0;
-    static const char* argv[MAX_ARGV] = { NULL };
-    static const char* envp[1] = { NULL };
+    static const char* argv[MAX_ARGV_CNT] = { NULL };
 
     ret = cmdline_read_gramine_args(cmdline, &argc, &argv[0]);
     if (ret < 0)
         INIT_FAIL("Failed to read Gramine arguments");
+
+    static int envp_cnt = 0;
+    static const char* envp[MAX_ENVS_CNT] = { NULL };
+
+    ret = cmdline_read_gramine_envs(g_envs, &envp_cnt, &envp[0]);
+    if (ret < 0)
+        INIT_FAIL("Failed to read host environment variables");
 
     if (argc < 2)
         print_usage_and_exit();
