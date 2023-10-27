@@ -49,7 +49,6 @@ isr_\num:
     isrstub 20
     isrstub 32   // Local APIC timer interrupt (in TSC-deadline mode)
     isrstub 64   // virtio devices interrupt (console, fs, vsock)
-    isrstub 128  // software interrupt: legacy system call (via `int 0x80`) ISR
 
 isr_spurious:
     iretq
