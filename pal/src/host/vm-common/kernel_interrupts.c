@@ -51,7 +51,6 @@ extern void isr_19(void);
 extern void isr_20(void);
 extern void isr_32(void);
 extern void isr_64(void);
-extern void isr_128(void);
 extern void isr_spurious(void);
 
 static struct idt_gate* g_idt = NULL; /* IDT with 256 partially filled gates, see *.S */
@@ -272,11 +271,6 @@ static int idt_init(void) {
         return -PAL_ERROR_BADADDR;
 
     ret = idt_gate_set(64, &isr_64); /* generic virtio devices IRQ */
-    if (ret < 0)
-        return -PAL_ERROR_BADADDR;
-
-    /* software interrupts */
-    ret = idt_gate_set(128, &isr_128); /* legacy system call via (`int 0x80`) */
     if (ret < 0)
         return -PAL_ERROR_BADADDR;
 
