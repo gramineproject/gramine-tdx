@@ -9,7 +9,7 @@
   - PAL:     at [896MB, 1GB) (forced by TD-Shim)
   - LibOS:   close to end-of-RAM, but not in below regions
   - PTs:     at [512MB, 648MB)
-  - VQs:     at [648MB, 896MB) -- this is "shared memory"
+  - Sh mem:  at [648MB, 896MB) -- shared memory for virtqueues and TDX Quote
   - Hole:    from 2GB to 3GB (QEMU/KVM creates this hole)
   - PCI bus: from 3GB to 4GB
   - (the rest space is for app usage)
@@ -44,9 +44,11 @@
 - Randomness: via `rdrand` instruction
 
 - CPUID: mostly via `cpuid` instruction (on trusted leaves), but some leaves'
-  returns are hard-coded (on untrusted leaves)
+  returns are synthetic (on untrusted leaves)
 
-- No pre-defined environment variables
+- Environment variables taken from the host (VMM session) and whitelisted
+
+- Eventfd (only local)
 
 - Pipes: 4K buffer, blocking via `sched_thread_wait`/`sched_thread_wakeup`
 
@@ -54,20 +56,20 @@
   - stdin supports only non-interactive mode (input is assumed to be supplied
     from e.g. a file)
 
-- Files: single shared directory, uses virtio-fs driver
-  (on the host side, run `virtiofsd --shared-dir /`)
+- Files: shared root directory, uses virtio-fs driver
+  - on the host side, Gramine starts `virtiofsd --shared-dir /`
 
 - Networking: uses virtio-vsock driver
   - may need to load the Linux kernel module: `sudo modprobe vhost_vsock`
 
 # Not yet implemented
 
-- `_PalThreadResume()`
+- `_PalThreadResume()` -- threads sending signals to each other (currently no
+  apps seen relying on this behavior)
 
 - CPU/NUMA topology (currently hard-coded single NUMA node)
 
-- Debugging support
+- Full debugging support (currently can put breakpoints and check backtraces,
+  regs, state)
 
-- Eventfd
-
-- Multi-processing
+- Multi-processing (currently out of scope)
