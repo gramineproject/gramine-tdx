@@ -261,7 +261,7 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
      * the E820 table), so that memory allocator doesn't use them:
      *   - [0, 1MB):       legacy DOS (includes DOS area, SMM memory, System BIOS),
      *   - [512MB, 648MB): page tables,
-     *   - [648MB, 896MB): shared memory for virtqueues,
+     *   - [648MB, 896MB): shared memory for virtqueues and for Quote (in TDX case),
      *   - [2GB, 3GB):     memory hole (QEMU doesn't map any memory here),
      *   - [3GB, 4GB):     PCI (includes BARs, LAPIC, IOAPIC).
      *

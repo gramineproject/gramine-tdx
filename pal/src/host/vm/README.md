@@ -9,7 +9,7 @@
   - PAL:     at 1M (and before 4MB)
   - LibOS:   close to end-of-RAM, but not in below regions
   - PTs:     at [512MB, 648MB)
-  - VQs:     at [648MB, 896MB) -- this is "shared memory"
+  - Sh mem:  at [648MB, 896MB) -- shared memory for virtqueues
   - Hole:    from 2GB to 3GB (QEMU/KVM creates this hole)
   - PCI bus: from 3GB to 4GB
   - (the rest space is for app usage)
@@ -45,7 +45,9 @@
 
 - CPUID: via `cpuid` instruction, as in normal VM it is trusted
 
-- No pre-defined environment variables
+- Environment variables taken from the host (VMM session) and whitelisted
+
+- Eventfd (only local)
 
 - Pipes: 4K buffer, blocking via `sched_thread_wait`/`sched_thread_wakeup`
 
@@ -61,12 +63,12 @@
 
 # Not yet implemented
 
-- `_PalThreadResume()`
+- `_PalThreadResume()` -- threads sending signals to each other (currently no
+  apps seen relying on this behavior)
 
 - CPU/NUMA topology (currently hard-coded single NUMA node)
 
-- Debugging support
+- Full debugging support (currently can put breakpoints and check backtraces,
+  regs, state)
 
-- Eventfd
-
-- Multi-processing
+- Multi-processing (currently out of scope)
