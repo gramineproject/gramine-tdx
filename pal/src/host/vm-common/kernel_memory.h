@@ -10,7 +10,7 @@
 #define PAGE_TABLES_ADDR 0x20000000UL          /* page tables occupy [512MB, 648MB) */
 #define PAGE_TABLES_SIZE (136UL * 1024 * 1024) /* 136MB, enough to describe 64GB of addr space */
 
-#define SHARED_MEM_ADDR 0x028800000UL          /* memory for virtqueues occupies [648MB, 896MB) */
+#define SHARED_MEM_ADDR 0x028800000UL          /* shared memory occupies [648MB, 896MB) */
 #define SHARED_MEM_SIZE (248UL * 1024 * 1024)  /* 248MB */
 
 /* equivalent to E820_TABLE_ENTRY in EFI_HOB_E820_TABLE (needs to be packed) */
