@@ -49,8 +49,10 @@ int init_multicore_prepare(uint32_t num_cpus) {
     char* per_cpu_interrupt_xsave_area = calloc(num_cpus + 1, INTERRUPT_XSAVE_AREA_SIZE);
     char* per_cpu_scheduling_stack = calloc(num_cpus, SCHEDULING_STACK_SIZE);
     if (!g_per_cpu_data || !per_cpu_interrupt_stack || !per_cpu_interrupt_xsave_area
-            || !per_cpu_scheduling_stack)
-        return -PAL_ERROR_NOMEM;
+            || !per_cpu_scheduling_stack) {
+        ret = -PAL_ERROR_NOMEM;
+        goto out;
+    }
 
     /* interrupt stacks/xsave areas may be allocated not at page boundary, so need to adjust */
     per_cpu_interrupt_stack = ALIGN_UP_PTR(per_cpu_interrupt_stack, INTERRUPT_STACK_SIZE);
@@ -61,7 +63,7 @@ int init_multicore_prepare(uint32_t num_cpus) {
         struct thread* thread;
         ret = thread_helper_create(thread_idle_run, &thread);
         if (ret < 0)
-            return ret;
+            goto out;
 
         g_per_cpu_data[i].idle_thread = thread;
         g_per_cpu_data[i].interrupt_stack = per_cpu_interrupt_stack + i * INTERRUPT_STACK_SIZE;
@@ -73,13 +75,21 @@ int init_multicore_prepare(uint32_t num_cpus) {
     /* only CPU0 has a bottomhalves thread currently (i.e. CPU0 handles all incoming events) */
     ret = thread_helper_create(thread_bottomhalves_run, &g_per_cpu_data[0].bottomhalves_thread);
     if (ret < 0)
-        return ret;
+        goto out;
 
     g_per_cpu_data[0].cpu_id = 0;
     wrmsr(MSR_IA32_GS_KERNEL_BASE, (uint64_t)&g_per_cpu_data[0]);
 
     g_num_cpus = num_cpus;
-    return 0;
+    ret = 0;
+out:
+    if (ret < 0) {
+        free(g_per_cpu_data);
+        free(per_cpu_interrupt_stack);
+        free(per_cpu_interrupt_xsave_area);
+        free(per_cpu_scheduling_stack);
+    }
+    return ret;
 }
 
 static int init_multicore_mp_wakeup_mailbox(uint32_t num_cpus, void* hob_list_addr) {

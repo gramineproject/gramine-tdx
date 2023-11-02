@@ -266,9 +266,7 @@ int realpath(const char* path, char* got_path, char** out_got_path) {
     /* Make sure it's null terminated. */
     *new_path = '\0';
 
-    if (out_got_path)
-        *out_got_path = got_path;
-
+    *out_got_path = got_path;
     ret = 0;
 out:
     if (ret < 0)
