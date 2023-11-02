@@ -357,7 +357,7 @@ static int send_pending_tq_control_packets(void) {
 
         uint16_t desc_idx;
         uint64_t packet_size = sizeof(struct virtio_vsock_hdr) + packet->header.size;
-        int ret = virtq_alloc_desc(g_vsock->tq, /*addr=*/NULL, packet_size, /*flags=*/0, &desc_idx);
+        ret = virtq_alloc_desc(g_vsock->tq, /*addr=*/NULL, packet_size, /*flags=*/0, &desc_idx);
         if (ret < 0) {
             /* TX buffer is full, postpone sending the rest of TQ control packets to next time */
             goto out;
@@ -709,7 +709,6 @@ static int recv_rw_packet(struct virtio_vsock_connection* conn,
     if (in_flight_packets_cnt >= VSOCK_MAX_PACKETS) {
         log_warning("RX vsock queue is full, have to drop incoming RW packet (payload size %u)",
                      packet->header.size);
-        free(packet);
         return -PAL_ERROR_NOMEM;
     }
 
@@ -1353,7 +1352,7 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
         goto out;
 
     timeout_absolute_us = curr_time_us + timeout_us;
-    register_timeout(timeout_absolute_us, &conn->state_futex, &timeout);
+    ret = register_timeout(timeout_absolute_us, &conn->state_futex, &timeout);
     if (ret < 0)
         goto out;
 
@@ -1371,7 +1370,7 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
     while (conn->state != VIRTIO_VSOCK_ESTABLISHED) {
         if (conn->state != VIRTIO_VSOCK_CONNECT) {
             ret = -PAL_ERROR_CONNFAILED;
-            break;
+            goto out;
         }
 
         /* check if timeout expired */
@@ -1380,11 +1379,11 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
         uint64_t curr_time_us;
         ret = get_time_in_us(&curr_time_us);
         if (ret < 0)
-            break;
+            goto out;
 
         if (timeout_absolute_us <= curr_time_us) {
             ret = -PAL_ERROR_CONNFAILED; /* must return ETIMEOUT but PAL doesn't have such code */
-            break;
+            goto out;
         }
 
         /* connection state not changed to ESTABLISHED, need to sleep */
@@ -1616,7 +1615,7 @@ static int virtio_vsock_shutdown_common(struct virtio_vsock_connection* conn, ui
         goto out;
 
     timeout_absolute_us = curr_time_us + timeout_us;
-    register_timeout(timeout_absolute_us, &conn->state_futex, &timeout);
+    ret = register_timeout(timeout_absolute_us, &conn->state_futex, &timeout);
     if (ret < 0)
         goto out;
 
@@ -1629,7 +1628,7 @@ static int virtio_vsock_shutdown_common(struct virtio_vsock_connection* conn, ui
     while (conn->state != VIRTIO_VSOCK_CLOSE) {
         if (conn->state != VIRTIO_VSOCK_CLOSING) {
             ret = -PAL_ERROR_DENIED;
-            break;
+            goto out;
         }
 
         /* check if timeout expired */
@@ -1638,11 +1637,11 @@ static int virtio_vsock_shutdown_common(struct virtio_vsock_connection* conn, ui
         uint64_t curr_time_us;
         ret = get_time_in_us(&curr_time_us);
         if (ret < 0)
-            break;
+            goto out;
 
         if (timeout_absolute_us <= curr_time_us) {
             ret = -PAL_ERROR_DENIED;
-            break;
+            goto out;
         }
 
         /* connection state not changed to CLOSE, need to sleep */

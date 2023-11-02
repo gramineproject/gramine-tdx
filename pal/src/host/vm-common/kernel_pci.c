@@ -334,39 +334,36 @@ static int pci_bus_init(void) {
     int ret;
 
     /* brute force scan of all devices (and their functions) on bus 0; note that PCI bus allows up
-     * to 32 devices on a single bus, with each device having up to 8 functions */
+     * to 32 devices on a single bus, with each device having up to 8 functions, but we only care
+     * about single-function devices */
     for (uint32_t device = 0; device < 32; device++) {
-        for (uint32_t function = 0; function < 8; function++) {
-            uint32_t bdf = (/*bus=*/0 * 256) + (device * 8) + function;
+        uint32_t bdf = (/*bus=*/0 * 256) + (device * 8) + /*function=*/0;
 
-            uint16_t vendor_id = pci_config_readw(bdf, PCI_VENDOR_ID);
-            if (vendor_id != PCI_VENDOR_ID_VIRTIO) {
-                /* ignore non-virtio devices */
-                break;
-            }
-
-            uint16_t device_id = pci_config_readw(bdf, PCI_DEVICE_ID);
-            if (device_id != PCI_DEVICE_ID_CONSOLE_LEGACY &&
-                    device_id != PCI_DEVICE_ID_CONSOLE &&
-                    device_id != PCI_DEVICE_ID_FS &&
-                    device_id != PCI_DEVICE_ID_VSOCK) {
-                /* ignore unknown virtio devices (only know about console, fs, vsock) */
-                break;
-            }
-
-            uint8_t header_type = pci_config_readb(bdf, PCI_HEADER_TYPE);
-            if (header_type != 0x0) {
-                /* console/fs/vsock virtio device must be a general device */
-                return -PAL_ERROR_NOTSUPPORT;
-            }
-
-            ret = pci_dev_init(bdf, device_id);
-            if (ret < 0)
-                return ret;
-
-            if (function == 0 && !(header_type & PCI_HEADER_TYPE_MULTI_FUNCTION))
-                break;
+        uint16_t vendor_id = pci_config_readw(bdf, PCI_VENDOR_ID);
+        if (vendor_id != PCI_VENDOR_ID_VIRTIO) {
+            /* ignore non-virtio devices */
+            continue;
         }
+
+        uint16_t device_id = pci_config_readw(bdf, PCI_DEVICE_ID);
+        if (device_id != PCI_DEVICE_ID_CONSOLE_LEGACY &&
+                device_id != PCI_DEVICE_ID_CONSOLE &&
+                device_id != PCI_DEVICE_ID_FS &&
+                device_id != PCI_DEVICE_ID_VSOCK) {
+            /* ignore unknown virtio devices (only know about console, fs, vsock) */
+            continue;
+        }
+
+        uint8_t header_type = pci_config_readb(bdf, PCI_HEADER_TYPE);
+        if (header_type != 0x0) {
+            /* console/fs/vsock virtio device must be a general single-function device (not a
+             * multi-function device) */
+            return -PAL_ERROR_NOTSUPPORT;
+        }
+
+        ret = pci_dev_init(bdf, device_id);
+        if (ret < 0)
+            return ret;
     }
 
     return 0;
