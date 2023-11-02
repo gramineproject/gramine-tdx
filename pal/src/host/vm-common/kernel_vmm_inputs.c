@@ -48,19 +48,25 @@ static int cmdline_read_common(enum cmdline_parse_type type, const char* input, 
             return -PAL_ERROR_INVAL;
     }
 
+    int ret;
+    char* p;
     size_t curr_cnt = 0;
 
-    char* p = strdup(input);
-    if (!p)
+    char* input_copy = strdup(input);
+    if (!input_copy)
         return -PAL_ERROR_NOMEM;
 
-    p = strstr(p, begin_str);
-    if (!p)
-        return -PAL_ERROR_INVAL;
+    p = strstr(input_copy, begin_str);
+    if (!p) {
+        ret = -PAL_ERROR_INVAL;
+        goto out;
+    }
 
     char* p_end = strstr(p, end_str);
-    if (!p_end)
-        return -PAL_ERROR_INVAL;
+    if (!p_end) {
+        ret = -PAL_ERROR_INVAL;
+        goto out;
+    }
 
     /* do not count the end_str (e.g. `-gramine-args-end`) and everything after it as arguments */
     *p_end = '\0';
@@ -72,8 +78,10 @@ static int cmdline_read_common(enum cmdline_parse_type type, const char* input, 
         if (*p == '\0')
             break;
 
-        if (curr_cnt == max_tokens)
-            return -PAL_ERROR_NOMEM;
+        if (curr_cnt == max_tokens) {
+            ret = -PAL_ERROR_NOMEM;
+            goto out;
+        }
 
         bool token_in_double_quotes = false;
         if (*p == '"') {
@@ -87,8 +95,10 @@ static int cmdline_read_common(enum cmdline_parse_type type, const char* input, 
         if (token_in_double_quotes) {
             while (*p != '\0' && *p != '"')
                 p++;
-            if (*p == '\0')
-                return -PAL_ERROR_INVAL;
+            if (*p == '\0') {
+                ret = -PAL_ERROR_INVAL;
+                goto out;
+            }
             *p++ = '\0'; /* replace closing double-quote with NUL */
         } else {
             while (*p != '\0' && *p != ' ' && *p != '\t')
@@ -97,8 +107,13 @@ static int cmdline_read_common(enum cmdline_parse_type type, const char* input, 
         }
     }
 
+    /* items of out_array point into `input_copy` buffer */
     *out_cnt = curr_cnt;
-    return 0;
+    ret = 0;
+out:
+    if (ret < 0)
+        free(input_copy);
+    return ret;
 }
 
 /* parse the gramine cmdline args passed by the VMM */

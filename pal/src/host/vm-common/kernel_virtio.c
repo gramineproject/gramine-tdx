@@ -85,6 +85,9 @@ fail:
 }
 
 int virtq_free(struct virtqueue* virtq, uint16_t queue_size) {
+    if (!virtq)
+        return 0;
+
     memory_free_shared_region(virtq->used_event, sizeof(uint16_t) + sizeof(uint16_t));
     memory_free_shared_region(virtq->desc, queue_size * sizeof(struct virtq_desc));
     memory_free_shared_region(virtq->avail, sizeof(struct virtq_avail) +
