@@ -10,8 +10,6 @@
 #include "kernel_sched.h"
 #include "kernel_thread.h"
 
-#define MAX_NUM_CPUS 256
-
 #define SCHEDULING_STACK_SIZE    128     /* temp stack used by save_context_and_restore_next() */
 
 #define AP_STARTUP_PAGE_ADDRESS 0x8000UL /* copy AP asm startup code to 32K address */

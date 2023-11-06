@@ -2,7 +2,8 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 /*
- * Trivial round-robin Single Queue Multiprocessor Scheduler (SQMS) implementation.
+ * Trivial round-robin Single Queue Multiprocessor Scheduler (SQMS) implementation. Takes into
+ * account CPU affinity.
  */
 
 #include <stdint.h>
@@ -88,23 +89,30 @@ static struct thread* find_next_thread(struct thread* curr_thread) {
         LISTP_ADD_TAIL(curr_thread, &g_thread_list, list);
     }
 
+    uint32_t cpu_id = get_per_cpu_data()->cpu_id;
     struct thread* next_thread = NULL;
 
     struct thread* thread;
     LISTP_FOR_EACH_ENTRY(thread, &g_thread_list, list) {
-        if (thread->state == THREAD_RUNNABLE) {
-            if (!next_thread) {
-                /* found first runnable thread, mark it as to-be-run next */
-                next_thread = thread;
-            } else {
-                /* found second runnable thread, kick some other CPU to schedule that thread */
-                __atomic_store_n(&g_kick_sched_thread, true, __ATOMIC_RELEASE);
-                break;
-            }
+        if (thread->state != THREAD_RUNNABLE)
+            continue;
+
+        size_t cpu_mask_idx = cpu_id / BITS_IN_TYPE(unsigned long);
+        unsigned long cpu_mask_bit = 1UL << (cpu_id % BITS_IN_TYPE(unsigned long));
+        if (!(thread->cpu_mask[cpu_mask_idx] & cpu_mask_bit))
+            continue;
+
+        if (!next_thread) {
+            /* found first runnable thread, mark it as to-be-run next */
+            next_thread = thread;
+        } else {
+            /* found second runnable thread, kick some other CPU to schedule that thread */
+            __atomic_store_n(&g_kick_sched_thread, true, __ATOMIC_RELEASE);
+            break;
         }
     }
 
-    if (!next_thread && get_per_cpu_data()->cpu_id == 0) {
+    if (!next_thread && cpu_id == 0) {
         /* CPU0 must periodically handle incoming events (network packets, stdin) */
         assert(get_per_cpu_data()->bottomhalves_thread);
         assert(get_per_cpu_data()->bottomhalves_thread->state != THREAD_BLOCKED);
@@ -250,5 +258,22 @@ void sched_thread_remove(struct thread* thread) {
     LISTP_DEL(thread, &g_thread_list, list);
     thread->state = THREAD_STOPPED;
     thread->blocked_on = NULL;
+    spinlock_unlock_enable_irq(&g_thread_list_lock);
+}
+
+void sched_thread_set_cpu_affinity(struct thread* thread, unsigned long* cpu_mask,
+                                   size_t cpu_mask_len) {
+    assert(g_num_cpus >= 1 && g_num_cpus <= MAX_NUM_CPUS);
+
+    spinlock_lock_disable_irq(&g_thread_list_lock);
+    memset(thread->cpu_mask, 0, MAX_NUM_CPU_LONGS * 8);
+    for (size_t i = 0; i < g_num_cpus; i++) {
+        size_t cpu_mask_idx = i / BITS_IN_TYPE(*cpu_mask);
+        if (cpu_mask_idx >= cpu_mask_len)
+            break;
+        if (cpu_mask[cpu_mask_idx] & (1UL << (i % BITS_IN_TYPE(*cpu_mask)))) {
+            thread->cpu_mask[cpu_mask_idx] |= 1UL << (i % BITS_IN_TYPE(*cpu_mask));
+        }
+    }
     spinlock_unlock_enable_irq(&g_thread_list_lock);
 }

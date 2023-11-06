@@ -33,20 +33,12 @@ int _PalThreadResume(struct pal_handle* thread) {
 
 int _PalThreadSetCpuAffinity(struct pal_handle* thread, unsigned long* cpu_mask,
                              size_t cpu_mask_len) {
-    /* NOTE: currently dummy */
-    __UNUSED(thread);
-    __UNUSED(cpu_mask);
-    __UNUSED(cpu_mask_len);
-    return 0;
+    return pal_common_thread_set_cpu_affinity(thread, cpu_mask, cpu_mask_len);
 }
 
 int _PalThreadGetCpuAffinity(struct pal_handle* thread, unsigned long* cpu_mask,
                              size_t cpu_mask_len) {
-    /* NOTE: currently dummy */
-    __UNUSED(thread);
-    __UNUSED(cpu_mask_len);
-    cpu_mask[0] = 1; /* set single (first) core */
-    return 0;
+    return pal_common_thread_get_cpu_affinity(thread, cpu_mask, cpu_mask_len);
 }
 
 struct handle_ops g_thread_ops = {

@@ -39,6 +39,8 @@
   - cooperative (non-preemptive) in ring-0 (upon `_PalThreadYieldExecution` and
     blocking syscalls)
 
+- CPU affinity
+
 - XSAVE area: always saved and restored on context switches and interrupts
 
 - Randomness: via `rdrand` instruction

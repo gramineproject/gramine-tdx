@@ -2,7 +2,7 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 /*
- * Declarations for scheduling and context switching.
+ * Declarations for scheduling and context switching. Also takes care of CPU affinity.
  */
 
 #pragma once
@@ -12,6 +12,10 @@
 #include "spinlock.h"
 
 #include "kernel_interrupts.h"
+
+#define MAX_NUM_CPUS 256
+#define MAX_NUM_CPU_LONGS (MAX_NUM_CPUS / BITS_IN_TYPE(unsigned long))
+static_assert(MAX_NUM_CPUS % BITS_IN_TYPE(unsigned long) == 0, "");
 
 /*
  * FS_BASE: to allow apps (mainly Glibc) to set up Thread-Local Storage;
@@ -37,3 +41,5 @@ void sched_thread_wakeup(int* futex_word);
 
 void sched_thread_add(struct thread* thread);
 void sched_thread_remove(struct thread* thread);
+void sched_thread_set_cpu_affinity(struct thread* thread, unsigned long* cpu_mask,
+                                   size_t cpu_mask_len);
