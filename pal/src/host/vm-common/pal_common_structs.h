@@ -110,6 +110,7 @@ struct pal_handle_inner_thread {
     uint32_t tid;
     void*    stack;  /* points to the base of stack, suitable for free(stack) */
     void*    fpregs; /* points to XSAVE memory region, suitable for free(fpregs) */
+    struct thread* kernel_thread;
 };
 
 struct pal_handle_inner_event {

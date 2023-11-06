@@ -115,6 +115,8 @@ void thread_setup(struct thread* thread, void* fpregs, void* stack, int (*callba
     thread->state = THREAD_RUNNABLE;
     thread->blocked_on = NULL;
 
+    memset(thread->cpu_mask, 0xFF, MAX_NUM_CPU_LONGS * 8);
+
     __atomic_store_n(&g_kick_sched_thread, true, __ATOMIC_RELEASE);
 }
 

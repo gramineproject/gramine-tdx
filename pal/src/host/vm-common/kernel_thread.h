@@ -14,6 +14,8 @@
 #include "api.h"
 #include "list.h"
 
+#include "kernel_sched.h"
+
 #define THREAD_STACK_SIZE (PRESET_PAGESIZE * 16) /* 64KB user stack */
 #define ALT_STACK_SIZE    (PRESET_PAGESIZE * 2)  /* 8KB signal stack */
 
@@ -71,6 +73,9 @@ struct thread {
     uint32_t thread_id; /* for debugging purposes */
     int* blocked_on;
     bool is_helper; /* is it an idle or bottomhalves thread */
+
+    /* CPU affinity of a thread */
+    unsigned long cpu_mask[MAX_NUM_CPU_LONGS];
 
     /* for context switching: GPRs + XSAVE area of a thread during kernel execution (when it
      * explicitly yields, i.e., we implement cooperative kernel scheduling) or during userland

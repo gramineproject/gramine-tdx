@@ -11,6 +11,7 @@
 #include "pal_error.h"
 #include "pal_internal.h"
 
+#include "kernel_multicore.h"
 #include "kernel_sched.h"
 #include "kernel_thread.h"
 #include "kernel_xsave.h"
@@ -61,6 +62,7 @@ int pal_common_thread_create(struct pal_handle** handle, int (*callback)(void*),
     thread_handle->thread.tid = assign_new_tid();
     thread_handle->thread.stack = stack;
     thread_handle->thread.fpregs = fpregs;
+    thread_handle->thread.kernel_thread = &tcb->kernel_thread;
 
     tcb->common.self   = &tcb->common;
     tcb->thread_handle = thread_handle;
@@ -92,6 +94,40 @@ noreturn void pal_common_thread_exit(int* clear_child_tid) {
 
 	thread_free_stack_and_die(thread_handle->thread.stack, clear_child_tid);
     __builtin_unreachable();
+}
+
+int pal_common_thread_set_cpu_affinity(struct pal_handle* thread, unsigned long* cpu_mask,
+                                       size_t cpu_mask_len) {
+    sched_thread_set_cpu_affinity(thread->thread.kernel_thread, cpu_mask, cpu_mask_len);
+    return 0;
+}
+
+int pal_common_thread_get_cpu_affinity(struct pal_handle* thread, unsigned long* cpu_mask,
+                                       size_t cpu_mask_len) {
+    __UNUSED(thread);
+    assert(g_num_cpus >= 1 && g_num_cpus <= MAX_NUM_CPUS);
+
+    static bool called = false;
+    if (__atomic_exchange_n(&called, true, __ATOMIC_ACQUIRE)) {
+        /* LibOS must call this API only once (at init) */
+        log_error("Get CPU affinity called twice?! Bug in LibOS.");
+        BUG();
+    }
+
+    if (cpu_mask_len * BITS_IN_TYPE(*cpu_mask) > MAX_NUM_CPUS) {
+        log_error("Get CPU affinity: too many CPUs requested in CPU mask.");
+        return -PAL_ERROR_INVAL;
+    }
+
+    if (cpu_mask_len * BITS_IN_TYPE(*cpu_mask) < g_num_cpus) {
+        log_error("Get CPU affinity: CPU mask cannot fit all CPUs.");
+        return -PAL_ERROR_INVAL;
+    }
+
+    for (size_t i = 0; i < g_num_cpus; i++) {
+        cpu_mask[i / BITS_IN_TYPE(*cpu_mask)] |= 1UL << (i % BITS_IN_TYPE(*cpu_mask));
+    }
+    return 0;
 }
 
 struct thread* get_thread_ptr(uintptr_t curr_gs_base) {
