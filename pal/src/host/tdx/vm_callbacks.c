@@ -15,6 +15,7 @@
 #include "kernel_debug.h"
 #include "kernel_interrupts.h"
 #include "kernel_memory.h"
+#include "kernel_multicore.h"
 #include "kernel_pci.h"
 #include "kernel_vmm_inputs.h"
 #include "tdx_arch.h"
@@ -307,26 +308,40 @@ int vm_virtualization_exception(struct isr_regs* regs) {
                     return 0;
                 }
             } else if (regs->rax == 0xb) {
-                /* Extended Topology Enumeration -- hard-code a single-core system (TODO) */
+                /* Extended Topology Enumeration -- emulate similarly to QEMU */
+
+                uint32_t v = 1, shifts = 0;
+                while (v < g_num_cpus) {
+                    v *= 2;
+                    shifts++;
+                }
+
+                uint32_t x2apic_id = get_per_cpu_data()->cpu_id; /* simplification */
                 if (regs->rcx == 0x0) {
                     /* level: SMT */
-                    regs->rax = 0x00000001; /* number of bits to shift right on x2APIC ID */
+                    regs->rax = 0x00000000; /* number of bits to shift right on x2APIC ID */
                     regs->rbx = 0x00000001; /* number of logical processors at this level type */
                     regs->rcx = 0x00000100; /* bits 15-08: level type, bits 07-00: same as rcx */
-                    regs->rdx = 0x00000000; /* x2APIC ID of current logical processor */
+                    regs->rdx = x2apic_id;  /* x2APIC ID of current logical processor */
                 } else if (regs->rcx == 0x1) {
                     /* level: Core */
-                    regs->rax = 0x00000007; /* number of bits to shift right on x2APIC ID; dummy */
-                    regs->rbx = 0x00000001; /* number of logical processors at this level type */
+                    regs->rax = shifts;     /* number of bits to shift right on x2APIC ID */
+                    regs->rbx = g_num_cpus; /* number of logical processors at this level type */
                     regs->rcx = 0x00000201; /* bits 15-08: level type, bits 07-00: same as rcx */
-                    regs->rdx = 0x00000000; /* x2APIC ID of current logical processor */
+                    regs->rdx = x2apic_id;  /* x2APIC ID of current logical processor */
                 } else {
                     /* level: unknown */
                     regs->rax = regs->rbx = 0x00000000; /* for invalid level type, all zeros */
                     /* bits 15-08: invalid level type, bits 07-00: same as rcx */
                     regs->rcx = 0x00000000 | regs->rcx;
-                    regs->rdx = 0x00000000; /* x2APIC ID of current logical processor */
+                    regs->rdx = x2apic_id;  /* x2APIC ID of current logical processor */
                 }
+                regs->rip += vmexit_instr_length;
+                return 0;
+            } else if (regs->rax == 0x1f) {
+                /* V2 Extended Topology Enumeration -- emulate as if doesn't exist (apps will then
+                 * fall back to leaf 0xb, see above) */
+                regs->rax = regs->rbx = regs->rcx = regs->rdx = 0x00000000;
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x80000002) {
