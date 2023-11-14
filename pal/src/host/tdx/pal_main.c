@@ -290,8 +290,7 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
 
     /* read VMM (untrusted) inputs: gramine args, environment variables and host's PWD from fw_cfg
      * QEMU pseudo-device, see also kernel_vmm_inputs.h */
-    char cmdline[512] = {0};
-    ret = cmdline_init_args(cmdline, sizeof(cmdline));
+    ret = cmdline_init_args(g_cmdline, sizeof(g_cmdline));
     if (ret < 0)
         INIT_FAIL("Can't read command line from VMM");
 
@@ -307,7 +306,7 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     if (ret < 0)
         INIT_FAIL("Failed FUSE_INIT request of virtio-fs driver");
 
-    ret = _PalThreadCreate(&g_first_thread_handle, pal_start_continue, cmdline);
+    ret = _PalThreadCreate(&g_first_thread_handle, pal_start_continue, g_cmdline);
     if (ret < 0)
         INIT_FAIL("Failed to create first thread");
 

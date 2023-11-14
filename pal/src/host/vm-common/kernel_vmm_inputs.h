@@ -33,7 +33,8 @@
 
 #define GRAMINE_ARGS_BEGIN_STR "-gramine-args"
 #define GRAMINE_ARGS_END_STR   "-gramine-args-end"
-#define MAX_ARGV_CNT 128 /* maximum number of Gramine arguments */
+#define MAX_ARGV_SIZE 4096 /* maximum size of Gramine arguments' string */
+#define MAX_ARGV_CNT  128  /* maximum number of Gramine arguments */
 
 #define GRAMINE_ENVS_BEGIN_STR "-gramine-envs"
 #define GRAMINE_ENVS_END_STR   "-gramine-envs-end"
@@ -63,6 +64,7 @@ enum cmdline_parse_type {
 };
 
 extern char g_host_pwd[PATH_MAX];
+extern char g_cmdline[MAX_ARGV_SIZE];
 extern char g_envs[MAX_ENVS_SIZE];
 
 int host_pwd_init(void);
