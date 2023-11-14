@@ -19,6 +19,7 @@
 #include "vm_callbacks.h"
 
 char g_host_pwd[PATH_MAX];
+char g_cmdline[MAX_ARGV_SIZE];
 char g_envs[MAX_ENVS_SIZE];
 
 /* This function copies `input` to a new string (we don't want to modify `input`) and splits the
@@ -171,7 +172,7 @@ int cmdline_init_args(char* cmdline_args, size_t cmdline_args_size) {
         cmdline_args[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
 
     uint32_t cmdline_args_len = strlen(cmdline_args);
-    if (cmdline_args_len == 0 || cmdline_args_len >= PATH_MAX)
+    if (cmdline_args_len == 0 || cmdline_args_len >= MAX_ARGV_SIZE)
         return -PAL_ERROR_INVAL;
 
     /* note that cmdline is guaranteed to be NULL terminated and have at least one symbol */
