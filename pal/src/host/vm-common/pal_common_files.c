@@ -16,6 +16,8 @@
 #include "path_utils.h"
 #include "stat.h"
 
+#include "external/realpath.h"
+
 #include "kernel_files.h"
 #include "kernel_memory.h"
 #include "kernel_virtio.h"
