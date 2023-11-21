@@ -30,6 +30,8 @@ pal_vm_common_sources = files(
     'pal_common_sockets.c',
     'pal_common_tf.c',
     'pal_common_threading.c',
+
+    'external/realpath.c',
 )
 
 pal_vm_common_nontdx_sources = files(
