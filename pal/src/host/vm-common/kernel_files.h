@@ -17,4 +17,3 @@
 int read_text_file_to_cstr(const char* path, char** out_buf, uint64_t* out_size);
 int emulate_file_map_via_read(uint64_t nodeid, uint64_t fh, void* addr, uint64_t offset,
                               uint64_t size);
-int realpath(const char* path, char* got_path, char** out_got_path);
