@@ -204,18 +204,18 @@ int virtio_console_nprint(const char* s, size_t size) {
         return -PAL_ERROR_BADHANDLE;
 
     spinlock_lock(&g_console_transmit_lock);
+    if (size > VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
+        /* message cannot fit into shared_tq_buf, cannot print it */
+        ret = -PAL_ERROR_NOMEM;
+        goto out;
+    }
+
     if (g_console->shared_tq_buf_pos + size > VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
         /* this message exceeds shared_tq_buf, assume that messages at the beginning of
          * shared_tq_buf were already consumed (and printed) by VMM and start overwriting them */
         g_console->shared_tq_buf_pos = 0;
     }
-
-    size_t left_in_shared_tq_buf = VIRTIO_CONSOLE_SHARED_BUF_SIZE - g_console->shared_tq_buf_pos;
-    if (size > left_in_shared_tq_buf) {
-        /* message doesn't fit into shared_tq_buf, cannot print it */
-        ret = -PAL_ERROR_NOMEM;
-        goto out;
-    }
+    assert(size <= VIRTIO_CONSOLE_SHARED_BUF_SIZE - g_console->shared_tq_buf_pos);
 
     /*
      * We copy original message into shared_tq_buf for two reasons:

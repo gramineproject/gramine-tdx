@@ -21,6 +21,8 @@
 #include "kernel_sched.h"
 #include "kernel_virtio.h"
 
+#define CONSOLE_OUT_CHUNK_SIZE 1024UL
+
 static int g_console_reader_futex;
 
 void thread_wakeup_console(void) {
@@ -93,9 +95,22 @@ int64_t pal_common_console_write(struct pal_handle* handle, uint64_t offset, uin
     if (!(handle->flags & PAL_HANDLE_FD_WRITABLE))
         return -PAL_ERROR_DENIED;
 
-    int ret = virtio_console_nprint(buffer, size);
-    if (ret < 0)
-        return ret;
+    uint64_t written = 0;
+    while (written < size) {
+        uint64_t to_write = MIN(size - written, CONSOLE_OUT_CHUNK_SIZE);
+        int ret = virtio_console_nprint(buffer + written, to_write);
+        if (ret < 0) {
+            if (ret == -PAL_ERROR_TRYAGAIN)
+                continue;
+            if (ret == -PAL_ERROR_NOMEM) {
+                /* this error means that we exceed the total capacity of virtio console buffer;
+                 * if this happens then our CONSOLE_OUT_CHUNK_SIZE is too big */
+                BUG();
+            }
+            return ret;
+        }
+        written += to_write;
+    }
 
     return (int64_t)size; /* virtio-console always prints the whole buffer */
 }
