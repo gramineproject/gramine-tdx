@@ -124,18 +124,13 @@ int virtio_vsock_isr(void) {
     return 0;
 }
 
-static int handle_rq(void) {
-    int ret;
-    bool received = false;
-
-    spinlock_lock(&g_vsock_receive_lock);
-    uint16_t host_used_idx = vm_shared_readw(&g_vsock->rq->used->idx);
+static int handle_rq(uint16_t host_used_idx, bool* out_received) {
+    assert(spinlock_is_locked(&g_vsock_receive_lock));
 
     if (host_used_idx - g_vsock->rq->seen_used > g_vsock->rq->queue_size) {
         /* malicious (impossible) value reported by the host; note that this check works also in
          * cases of int wrap */
-        ret = -PAL_ERROR_DENIED;
-        goto fail;
+        return -PAL_ERROR_DENIED;
     }
 
     while (host_used_idx != g_vsock->rq->seen_used) {
@@ -144,8 +139,7 @@ static int handle_rq(void) {
 
         if (desc_idx >= g_vsock->rq->queue_size) {
             /* malicious (out of bounds) descriptor index */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         uint64_t addr = vm_shared_readq(&g_vsock->rq->desc[desc_idx].addr);
@@ -155,27 +149,22 @@ static int handle_rq(void) {
         if (addr < (uintptr_t)g_vsock->shared_rq_buf ||
                 addr >= (uintptr_t)g_vsock->shared_rq_buf + shared_rq_buf_size) {
             /* malicious (out of bounds) address of the incoming packet */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         if ((addr - (uintptr_t)g_vsock->shared_rq_buf) % sizeof(struct virtio_vsock_packet)) {
             /* malicious (not aligned on packet struct size) offset of the incoming packet */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         if (size < sizeof(struct virtio_vsock_hdr) || size > sizeof(struct virtio_vsock_packet)) {
             /* malicious (out of bounds) size of the incoming packet */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         struct virtio_vsock_packet* packet = malloc(sizeof(*packet));
-        if (!packet) {
-            ret = -PAL_ERROR_NOMEM;
-            goto fail;
-        }
+        if (!packet)
+            return -PAL_ERROR_NOMEM;
 
         /* copy from untrusted shared memory, these contents should be verified in process_packet */
         vm_shared_memcpy(packet, (struct virtio_vsock_packet*)addr, sizeof(*packet));
@@ -193,17 +182,52 @@ static int handle_rq(void) {
         vm_shared_writew(&g_vsock->rq->avail->idx, g_vsock->rq->cached_avail_idx);
 
         g_vsock->rq->seen_used++;
-        received = true;
+        *out_received = true;
     }
+
+    return 0;
+}
+
+static int handle_rq_with_disabled_notifications(void) {
+    int ret;
+    bool received = false;
+
+    spinlock_lock(&g_vsock_receive_lock);
+
+    /* disable interrupts (we anyhow will consume all inputs on RX) */
+    vm_shared_writew(&g_vsock->rq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
+
+    while (true) {
+        uint16_t host_used_idx = vm_shared_readw(&g_vsock->rq->used->idx);
+        if (host_used_idx != g_vsock->rq->seen_used) {
+            ret = handle_rq(host_used_idx, &received);
+            if (ret < 0)
+                goto fail;
+        }
+
+        vm_shared_writew(&g_vsock->rq->avail->flags, 0); /* reenable interrupts */
+        uint16_t reread_host_used_idx = vm_shared_readw(&g_vsock->rq->used->idx);
+        if (reread_host_used_idx == g_vsock->rq->seen_used)
+            break;
+
+        /* disable interrupts and process RX again (that's a corner case: after the last check and
+         * before enabling interrupts, an interrupt has been suppressed by the device) */
+        vm_shared_writew(&g_vsock->rq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
+    }
+
     spinlock_unlock(&g_vsock_receive_lock);
 
     if (received) {
-        vm_mmio_writew(g_vsock->rq_notify_addr, /*queue_sel=*/0);
+        uint16_t host_device_used_flags = vm_shared_readw(&g_vsock->rq->used->flags);
+        if (!(host_device_used_flags & VIRTQ_USED_F_NO_NOTIFY))
+            vm_mmio_writew(g_vsock->rq_notify_addr, /*queue_sel=*/0);
         thread_wakeup_vsock(/*is_read=*/true);
     }
 
     return 0;
+
 fail:
+    vm_shared_writew(&g_vsock->rq->avail->flags, 0); /* reenable interrupts */
     spinlock_unlock(&g_vsock_receive_lock);
     return ret;
 }
@@ -228,7 +252,9 @@ static void copy_into_tq_internal(struct virtio_vsock_packet* packet, uint64_t p
 
     g_vsock->tx_cnt += packet->header.size;
 
-    vm_mmio_writew(g_vsock->tq_notify_addr, /*queue_sel=*/1);
+    uint16_t host_device_used_flags = vm_shared_readw(&g_vsock->tq->used->flags);
+    if (!(host_device_used_flags & VIRTQ_USED_F_NO_NOTIFY))
+        vm_mmio_writew(g_vsock->tq_notify_addr, /*queue_sel=*/1);
 }
 
 /* used only for data-flow packets (RW) */
@@ -262,6 +288,7 @@ static int copy_into_tq_and_free(struct virtio_vsock_packet* packet) {
     ret = 0;
 out:
     spinlock_unlock(&g_vsock_transmit_lock);
+    (void)cleanup_tq();
     free(packet);
     return ret;
 }
@@ -307,6 +334,7 @@ static int copy_into_tq_or_add_to_pending(struct virtio_vsock_packet* packet) {
     ret = 0;
 out:
     spinlock_unlock(&g_vsock_transmit_lock);
+    (void)cleanup_tq();
     if (!packet_ownership_transferred)
         free(packet);
     return ret;
@@ -400,7 +428,7 @@ bool virtio_vsock_can_write(void) {
 
 /* called from the bottomhalf thread in normal context (not interrupt context) */
 int virtio_vsock_bottomhalf(void) {
-    int handle_rq_ret = handle_rq();
+    int handle_rq_ret = handle_rq_with_disabled_notifications();
     int cleanup_tq_ret = cleanup_tq();
     int pending_tq_ret = send_pending_tq_control_packets();
     return handle_rq_ret ? handle_rq_ret : (cleanup_tq_ret ? cleanup_tq_ret : pending_tq_ret);
@@ -984,6 +1012,11 @@ static int virtio_vsock_alloc(struct virtio_vsock** out_vsock) {
     ret = virtq_create(VIRTIO_VSOCK_EVENT_QUEUE_SIZE, &eq);
     if (ret < 0)
         goto fail;
+
+    /* instruct the host to NOT send interrupts on TX upon consuming messages; the guest performs TX
+     * cleanup itself on demand, see `cleanup_tq()` usage */
+    vm_shared_writew(&tq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
+    vm_shared_writew(&eq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT); /* for sanity */
 
     vsock->rq = rq;
     vsock->tq = tq;
