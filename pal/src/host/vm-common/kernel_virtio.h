@@ -235,7 +235,6 @@ struct virtio_fs_config {
 /*
  * Notes on multi-core synchronization:
  *   - requests_notify_addr is set at init and used in virtio_fs_exec_request(), sync via lock
- *   - device_done is used by CPU0 interrupt handler and in virtio_fs_exec_request(), sync via lock
  *   - initialized is set at init, no sync required
  *   - shared_buf is set at init, no sync required
  *   - hiprio and notify are unused
@@ -247,7 +246,6 @@ struct virtio_fs_config {
 struct virtio_fs {
     /* in private memory */
     uint16_t* requests_notify_addr; /* calculated MMIO notify addr for requests queue */
-    bool device_done;               /* set on IRQ when device is ready with FUSE request */
 
     bool initialized;
 

@@ -60,18 +60,13 @@ int virtio_console_isr(void) {
     return 0;
 }
 
-static int handle_rq(void) {
-    int ret;
-    bool received = false;
-
-    spinlock_lock(&g_console_receive_lock);
-    uint16_t host_used_idx = vm_shared_readw(&g_console->rq->used->idx);
+static int handle_rq(uint16_t host_used_idx, bool* out_received) {
+    assert(spinlock_is_locked(&g_console_receive_lock));
 
     if (host_used_idx - g_console->rq->seen_used > g_console->rq->queue_size) {
         /* malicious (impossible) value reported by the host; note that this check works also in
          * cases of int wrap */
-        ret = -PAL_ERROR_DENIED;
-        goto fail;
+        return -PAL_ERROR_DENIED;
     }
 
     while (host_used_idx != g_console->rq->seen_used) {
@@ -80,8 +75,7 @@ static int handle_rq(void) {
 
         if (desc_idx >= g_console->rq->queue_size) {
             /* malicious (out of bounds) descriptor index */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         uint64_t addr = vm_shared_readq(&g_console->rq->desc[desc_idx].addr);
@@ -90,20 +84,17 @@ static int handle_rq(void) {
         if (addr < (uintptr_t)g_console->shared_rq_buf ||
                 addr >= (uintptr_t)g_console->shared_rq_buf + VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
             /* malicious (out of bounds) incoming message */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         if ((addr - (uintptr_t)g_console->shared_rq_buf) % VIRTIO_CONSOLE_ITEM_SIZE) {
             /* malicious (not aligned on max item size) offset of the incoming message */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         if (size > VIRTIO_CONSOLE_ITEM_SIZE) {
             /* malicious (out of bounds) size of the incoming message */
-            ret = -PAL_ERROR_DENIED;
-            goto fail;
+            return -PAL_ERROR_DENIED;
         }
 
         if (g_console->rq_buf_pos + size > VIRTIO_CONSOLE_RQ_BUF_SIZE) {
@@ -133,24 +124,59 @@ static int handle_rq(void) {
         vm_shared_writew(&g_console->rq->avail->idx, g_console->rq->cached_avail_idx);
 
         g_console->rq->seen_used++;
-        received = true;
+        *out_received = true;
     }
+
+    return 0;
+}
+
+static int handle_rq_with_disabled_notifications(void) {
+    int ret;
+    bool received = false;
+
+    spinlock_lock(&g_console_receive_lock);
+
+    /* disable interrupts (we anyhow will consume all inputs on RX) */
+    vm_shared_writew(&g_console->rq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
+
+    while (true) {
+        uint16_t host_used_idx = vm_shared_readw(&g_console->rq->used->idx);
+        if (host_used_idx != g_console->rq->seen_used) {
+            ret = handle_rq(host_used_idx, &received);
+            if (ret < 0)
+                goto fail;
+        }
+
+        vm_shared_writew(&g_console->rq->avail->flags, 0); /* reenable interrupts */
+        uint16_t reread_host_used_idx = vm_shared_readw(&g_console->rq->used->idx);
+        if (reread_host_used_idx == g_console->rq->seen_used)
+            break;
+
+        /* disable interrupts and process RX again (that's a corner case: after the last check and
+         * before enabling interrupts, an interrupt has been suppressed by the device) */
+        vm_shared_writew(&g_console->rq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
+    }
+
     spinlock_unlock(&g_console_receive_lock);
 
     if (received) {
-        vm_mmio_writew(g_console->rq_notify_addr, /*queue_sel=*/0);
+        uint16_t host_device_used_flags = vm_shared_readw(&g_console->rq->used->flags);
+        if (!(host_device_used_flags & VIRTQ_USED_F_NO_NOTIFY))
+            vm_mmio_writew(g_console->rq_notify_addr, /*queue_sel=*/0);
         thread_wakeup_console();
     }
 
     return 0;
+
 fail:
+    vm_shared_writew(&g_console->rq->avail->flags, 0); /* reenable interrupts */
     spinlock_unlock(&g_console_receive_lock);
     return ret;
 }
 
 /* called from the bottomhalf thread in normal context (not interrupt context) */
 int virtio_console_bottomhalf(void) {
-    return handle_rq();
+    return handle_rq_with_disabled_notifications();
 }
 
 int64_t virtio_console_read(char* buffer, size_t size) {
@@ -296,7 +322,10 @@ int virtio_console_nprint(const char* s, size_t size) {
     vm_shared_writew(&g_console->tq->avail->ring[avail_idx % g_console->tq->queue_size], desc_idx);
     vm_shared_writew(&g_console->tq->avail->idx, g_console->tq->cached_avail_idx);
 
-	vm_mmio_writew(g_console->tq_notify_addr, /*queue_sel=*/1);
+    uint16_t host_device_used_flags = vm_shared_readw(&g_console->tq->used->flags);
+    if (!(host_device_used_flags & VIRTQ_USED_F_NO_NOTIFY))
+        vm_mmio_writew(g_console->tq_notify_addr, /*queue_sel=*/1);
+
     ret = 0;
 out:
     spinlock_unlock(&g_console_transmit_lock);
@@ -403,6 +432,10 @@ static int virtio_console_alloc(struct virtio_console** out_console) {
     ret = virtq_create(VIRTIO_CONSOLE_CONTROL_QUEUE_SIZE, &control_tq);
     if (ret < 0)
         goto fail;
+
+    /* instruct the host to NOT send interrupts on TX upon consuming messages; the guest performs TX
+     * cleanup itself on demand, see `cleanup_tq_completely()` usage */
+    vm_shared_writew(&tq->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
 
     /* prepare all buffers in RX for usage by host */
     for (size_t i = 0; i < VIRTIO_CONSOLE_QUEUE_SIZE; i++) {
