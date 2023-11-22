@@ -14,6 +14,7 @@
 #include "kernel_debug.h"
 #include "kernel_memory.h"
 #include "kernel_pci.h"
+#include "kernel_time.h"
 #include "kernel_virtio.h"
 #include "vm_callbacks.h"
 
@@ -31,10 +32,6 @@ bool g_console_trigger_bottomhalf = false;
 /* coarse-grained locks to sync RX and TX operations on multi-core systems, see kernel_virtio.h */
 static spinlock_t g_console_receive_lock = INIT_SPINLOCK_UNLOCKED;
 static spinlock_t g_console_transmit_lock = INIT_SPINLOCK_UNLOCKED;
-
-/* for garbage collecting old descriptors */
-static uint16_t g_gc_descs[VIRTIO_CONSOLE_QUEUE_SIZE];
-static uint16_t g_gc_desc_idx;
 
 /* interrupt handler (interrupt service routine), called by generic handler `isr_c()` */
 int virtio_console_isr(void) {
@@ -196,6 +193,62 @@ out:
     return ret < 0 ? ret : (int64_t)bytes_read;
 }
 
+static int cleanup_tq(void) {
+    assert(spinlock_is_locked(&g_console_transmit_lock));
+
+    uint16_t host_used_idx = vm_shared_readw(&g_console->tq->used->idx);
+
+    if (host_used_idx - g_console->tq->seen_used > g_console->tq->queue_size) {
+        /* malicious (impossible) value reported by the host; note that this check works also in
+         * cases of int wrap */
+        return -PAL_ERROR_DENIED;
+    }
+
+    while (host_used_idx != g_console->tq->seen_used) {
+        uint16_t used_idx = g_console->tq->seen_used % g_console->tq->queue_size;
+        uint16_t desc_idx = (uint16_t)vm_shared_readl(&g_console->tq->used->ring[used_idx].id);
+
+        if (desc_idx >= g_console->tq->queue_size) {
+            /* malicious (out of bounds) descriptor index */
+            return -PAL_ERROR_DENIED;
+        }
+
+        if (virtq_is_desc_free(g_console->tq, desc_idx)) {
+            /* malicious descriptor index (attempt at double-free attack) */
+            return -PAL_ERROR_DENIED;
+        }
+
+        virtq_free_desc(g_console->tq, desc_idx);
+        g_console->tq->seen_used++;
+    }
+
+    return 0;
+}
+
+static int cleanup_tq_completely(void) {
+    assert(spinlock_is_locked(&g_console_transmit_lock));
+    int ret;
+
+    while (true) {
+        ret = cleanup_tq();
+        if (ret < 0)
+            return ret;
+
+        uint16_t curr_host_used_idx = g_console->tq->seen_used;
+        uint16_t expected_host_used_idx = g_console->tq->cached_avail_idx;
+        if (curr_host_used_idx == expected_host_used_idx) {
+            /* host consumed all pending messages (descriptors), we can repopulate tq */
+            break;
+        }
+        /* still some pending messages (descriptors) left to be consumed, let's wait */
+        ret = delay(/*delay_us=*/100UL, /*continue_gate=*/NULL);
+        if (ret < 0)
+            return ret;
+    }
+
+    return 0;
+}
+
 /* expects a null-terminated string */
 int virtio_console_nprint(const char* s, size_t size) {
     int ret;
@@ -211,8 +264,11 @@ int virtio_console_nprint(const char* s, size_t size) {
     }
 
     if (g_console->shared_tq_buf_pos + size > VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
-        /* this message exceeds shared_tq_buf, assume that messages at the beginning of
-         * shared_tq_buf were already consumed (and printed) by VMM and start overwriting them */
+        /* this message exceeds shared_tq_buf, wait until all messages in shared_tq_buf are consumed
+         * (and printed) by VMM and start overwriting the buffer */
+        ret = cleanup_tq_completely();
+        if (ret < 0)
+            goto out;
         g_console->shared_tq_buf_pos = 0;
     }
     assert(size <= VIRTIO_CONSOLE_SHARED_BUF_SIZE - g_console->shared_tq_buf_pos);
@@ -228,18 +284,10 @@ int virtio_console_nprint(const char* s, size_t size) {
     vm_shared_memcpy(shared_tq_buf_addr, s, size);
     g_console->shared_tq_buf_pos += size;
 
-    /* garbage collect an old descriptor */
-    uint16_t desc_to_gc = g_gc_descs[g_gc_desc_idx % VIRTIO_CONSOLE_QUEUE_SIZE];
-    if (desc_to_gc != (uint16_t)-1)
-        virtq_free_desc(g_console->tq, desc_to_gc);
-
     uint16_t desc_idx;
     ret = virtq_alloc_desc(g_console->tq, shared_tq_buf_addr, size, /*flags=*/0, &desc_idx);
     if (ret < 0)
         goto out;
-
-    g_gc_descs[g_gc_desc_idx % VIRTIO_CONSOLE_QUEUE_SIZE] = desc_idx;
-    g_gc_desc_idx++;
 
     /* place the descriptor with message in the queue for host-printing */
     uint16_t avail_idx = g_console->tq->cached_avail_idx;
@@ -479,9 +527,6 @@ int virtio_console_init(struct virtio_pci_regs* pci_regs, struct virtio_console_
 
     status = vm_mmio_readb(&pci_regs->device_status);
     vm_mmio_writeb(&pci_regs->device_status, status | VIRTIO_STATUS_DRIVER_OK);
-
-    for (size_t i = 0; i < VIRTIO_CONSOLE_QUEUE_SIZE; i++)
-        g_gc_descs[i] = (uint16_t)-1;
 
     g_console = console;
     return 0;
