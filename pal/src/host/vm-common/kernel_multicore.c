@@ -23,6 +23,7 @@
 #include "kernel_syscalls.h"
 #include "kernel_time.h"
 #include "kernel_xsave.h"
+#include "vm_callbacks.h"
 
 uint32_t g_num_cpus = 0;
 struct per_cpu_data* g_per_cpu_data = NULL;
@@ -147,7 +148,7 @@ static int init_multicore_init_sipi_sipi(uint32_t num_cpus) {
      *   - bits 19-18: destination shorthand = all excluding self (bits 11)
      */
     uint64_t icr_init_request = 0x000C4500UL;
-    wrmsr(MSR_IA32_LAPIC_ICR, icr_init_request);
+    vm_shared_wrmsr(MSR_INSECURE_IA32_LAPIC_ICR, icr_init_request);
 
     /* wait for 10ms */
     int ret = delay(/*delay_us=*/10000UL, /*continue_gate=*/NULL);
@@ -165,7 +166,7 @@ static int init_multicore_init_sipi_sipi(uint32_t num_cpus) {
      *   - bits 19-18: destination shorthand = all excluding self (bits 11)
      */
     uint64_t icr_sipi_request = 0x000C4608UL;
-    wrmsr(MSR_IA32_LAPIC_ICR, icr_sipi_request);
+    vm_shared_wrmsr(MSR_INSECURE_IA32_LAPIC_ICR, icr_sipi_request);
 
     /* wait for 200us */
     ret = delay(/*delay_us=*/200UL, /*continue_gate=*/NULL);
@@ -175,7 +176,7 @@ static int init_multicore_init_sipi_sipi(uint32_t num_cpus) {
     uint32_t actually_started_cpus = __atomic_load_n(&g_started_cpus, __ATOMIC_SEQ_CST);
     if (actually_started_cpus != num_cpus) {
         /* send a second SIPI request and wait a bit more */
-        wrmsr(MSR_IA32_LAPIC_ICR, icr_sipi_request);
+        vm_shared_wrmsr(MSR_INSECURE_IA32_LAPIC_ICR, icr_sipi_request);
         ret = delay(/*delay_us=*/100UL, /*continue_gate=*/NULL);
         if (ret < 0)
             return ret;
