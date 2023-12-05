@@ -19,7 +19,9 @@
 #define MSR_IA32_APIC_BASE 0x1b
 #define MSR_IA32_LAPIC_ID  0x802
 #define MSR_IA32_LAPIC_EOI 0x80b
-#define MSR_IA32_LAPIC_ICR 0x830 /* Interrupt Command Register to send IPIs */
+
+/* Interrupt Command Register to send IPIs; it is host-controlled in case of Intel TDX */
+#define MSR_INSECURE_IA32_LAPIC_ICR 0x830
 
 /* Convenience MSR to specify at which TSC value to generate next timer interrupt */
 #define MSR_INSECURE_IA32_TSC_DEADLINE 0x000006E0
