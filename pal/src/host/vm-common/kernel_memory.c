@@ -22,6 +22,8 @@
 #include "kernel_interrupts.h"
 #include "kernel_memory.h"
 
+static_assert(PAGE_SIZE == 4096, "unexpected PAGE_SIZE (expected 4K)");
+
 /* Beginning of the page table hierarchy */
 uint64_t g_pml4_table_base = 0;
 
@@ -33,7 +35,7 @@ void* memory_get_shared_region(size_t size) {
     if (!size)
         return NULL;
 
-    size = ALIGN_UP(size, PRESET_PAGESIZE);
+    size = ALIGN_UP(size, PAGE_SIZE);
 
     assert((uintptr_t)g_shared_heap_pos >= SHARED_MEM_ADDR);
     assert(access_ok(g_shared_heap_pos, size));
@@ -98,7 +100,7 @@ int memory_mark_pages_present(uint64_t addr, size_t size, bool present) {
         /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
         invlpg(mark_addr);
 
-        mark_addr += 4096;
+        mark_addr += PAGE_SIZE;
     }
     return 0;
 }
@@ -120,7 +122,7 @@ int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark) 
         /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
         invlpg(mark_addr);
 
-        mark_addr += 4096;
+        mark_addr += PAGE_SIZE;
     }
     return 0;
 }
@@ -139,7 +141,7 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
     size_t page_dir_tables_cnt = pages_2m_cnt / 512;
 
     size_t total_tables_cnt = page_tables_cnt + page_dir_tables_cnt + /*PDP=*/1 + /*PML4=*/1;
-    if (total_tables_cnt * 4096 > page_tables_size) {
+    if (total_tables_cnt * PAGE_SIZE > page_tables_size) {
         /* page tables can occupy no more than page_tables_size, check for sanity */
         return -PAL_ERROR_NOMEM;
     }
@@ -149,33 +151,33 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
     /* page tables with PTE leaf entries */
     uint64_t page_tables_base = ptr;
     for (size_t i = 0; i < pages_4k_cnt; i++) {
-        uint64_t entry = ((ptr - page_tables_base) / 8) * 4096 + flags;
+        uint64_t entry = ((ptr - page_tables_base) / 8) * PAGE_SIZE + flags;
         memcpy((void*)ptr, &entry, sizeof(entry));
         ptr += sizeof(entry);
     }
 
-    if (!IS_ALIGNED(ptr, 4096))
+    if (!IS_ALIGNED(ptr, PAGE_SIZE))
         return -PAL_ERROR_INVAL;
 
     /* page directory tables with PDE entries */
     uint64_t page_dir_tables_base = ptr;
     for (size_t i = 0; i < pages_2m_cnt; i++) {
-        uint64_t entry = page_tables_base + ((ptr - page_dir_tables_base) / 8) * 4096 + flags;
+        uint64_t entry = page_tables_base + ((ptr - page_dir_tables_base) / 8) * PAGE_SIZE + flags;
         memcpy((void*)ptr, &entry, sizeof(entry));
         ptr += sizeof(entry);
     }
 
-    if (!IS_ALIGNED(ptr, 4096))
+    if (!IS_ALIGNED(ptr, PAGE_SIZE))
         return -PAL_ERROR_INVAL;
 
     /* one PDP page with up to 512 PDPE entries */
     uint64_t pdp_table_base = ptr;
     for (size_t i = 0; i < pages_1g_cnt; i++) {
-        uint64_t entry = page_dir_tables_base + ((ptr - pdp_table_base) / 8) * 4096 + flags;
+        uint64_t entry = page_dir_tables_base + ((ptr - pdp_table_base) / 8) * PAGE_SIZE + flags;
         memcpy((void*)ptr, &entry, sizeof(entry));
         ptr += sizeof(entry);
     }
-    ptr = ALIGN_UP(ptr, 4096);
+    ptr = ALIGN_UP(ptr, PAGE_SIZE);
 
     /* one PML4 page with a single PML4E entry */
     uint64_t pml4_table_base = ptr;

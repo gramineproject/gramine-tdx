@@ -55,7 +55,7 @@ static int memory_mark_pages_shared(uint64_t addr, size_t size) {
         *pte_addr |= g_shared_bit;
         invlpg(mark_addr);
 
-        mark_addr += PRESET_PAGESIZE;
+        mark_addr += PAGE_SIZE;
     }
     return 0;
 }
@@ -169,7 +169,7 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     wrmsr(MSR_IA32_GS_BASE, 0x0); /* just for sanity: no current-thread TCB at init */
 
     /* initialize alloc_align as early as possible, a lot of PAL APIs depend on this being set */
-    g_pal_public_state.alloc_align = PRESET_PAGESIZE;
+    g_pal_public_state.alloc_align = PAGE_SIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
 
     uint8_t gpaw_unused;

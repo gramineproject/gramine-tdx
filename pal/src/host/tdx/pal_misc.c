@@ -99,7 +99,7 @@ out:
 
 static spinlock_t g_quote_lock = INIT_SPINLOCK_UNLOCKED;
 static void* g_shared_mem_for_quote = NULL;
-static size_t g_shared_mem_size_for_quote = PRESET_PAGESIZE * 4; /* 16KB is enough for TDX quotes */
+static size_t g_shared_mem_size_for_quote = PAGE_SIZE * 4; /* 16KB is enough for TDX quotes */
 
 int _PalAttestationQuote(const void* user_report_data, size_t user_report_data_size, void* quote,
                          size_t* quote_size) {
