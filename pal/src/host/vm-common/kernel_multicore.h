@@ -44,7 +44,8 @@ struct per_cpu_data {
     struct thread* idle_thread;         /* each CPU has its own idle thread */
     struct thread* bottomhalves_thread; /* only CPU0 has a bottomhalves thread currently */
 
-    uint8_t  reserved[16];
+    uint8_t invalidate_tlb_ipi_received; /* to protect against extra "invalidate TLB" interrupts */
+    uint8_t reserved[15];
 } __attribute__((packed));
 static_assert(sizeof(struct per_cpu_data) == 64, "incorrect struct size");
 

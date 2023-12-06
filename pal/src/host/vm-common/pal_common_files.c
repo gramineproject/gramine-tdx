@@ -365,7 +365,10 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
         return -PAL_ERROR_DENIED;
     }
 
-    ret = memory_alloc(addr, size);
+    bool read  = !!(prot & PAL_PROT_READ);
+    bool write = !!(prot & (PAL_PROT_WRITE | PAL_PROT_WRITECOPY));
+    bool execute = !!(prot & PAL_PROT_EXEC);
+    ret = memory_alloc(addr, size, read, write, execute);
     if (ret < 0)
         return ret;
 

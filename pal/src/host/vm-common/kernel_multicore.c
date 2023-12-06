@@ -17,6 +17,7 @@
 
 #include "kernel_acpi_madt.h"
 #include "kernel_apic.h"
+#include "kernel_interrupts.h"
 #include "kernel_memory.h"
 #include "kernel_multicore.h"
 #include "kernel_sched.h"
@@ -189,7 +190,7 @@ int init_multicore(uint32_t num_cpus, void* hob_list_addr) {
     int ret;
 
     if (num_cpus == 1)
-        return 0;
+        goto success;
 
     if (strcmp(XSTRINGIFY(HOST_TYPE), "TDX")) {
         /* in TDX, cannot access MSR_IA32_APIC_BASE, so skip this check */
@@ -260,6 +261,10 @@ int init_multicore(uint32_t num_cpus, void* hob_list_addr) {
             return ret;
     }
 
+success:
+    /* only after all CPUs initialized themselves (including interrupts init), can claim that
+     * interrupts are fully enabled in the system */
+    g_interrupts_enabled = true;
     return 0;
 }
 
