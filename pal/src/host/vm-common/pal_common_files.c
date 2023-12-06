@@ -365,9 +365,14 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
         return -PAL_ERROR_DENIED;
     }
 
+    ret = memory_alloc(addr, size);
+    if (ret < 0)
+        return ret;
+
     if (!handle->file.chunk_hashes) {
         /* case of allowed file */
-        return emulate_file_map_via_read(handle->file.nodeid, handle->file.fh, addr, offset, size);
+        ret = emulate_file_map_via_read(handle->file.nodeid, handle->file.fh, addr, offset, size);
+        goto out;
     }
 
     /* case of trusted file */
@@ -387,7 +392,7 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
                                            handle->file.chunk_hashes, handle->file.size);
         if (ret < 0) {
             log_error("Verification of trusted file failed during mmap: %s", pal_strerror(ret));
-            return ret;
+            goto out;
         }
 
         bytes_filled = end - offset;
@@ -398,7 +403,11 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
         memset((char*)addr + bytes_filled, 0, size - bytes_filled);
     }
 
-    return 0;
+    ret = 0;
+out:
+    if (ret < 0)
+        (void)memory_free(addr, size);
+    return ret;
 }
 
 int pal_common_file_setlength(struct pal_handle* handle, uint64_t length) {
