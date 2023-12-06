@@ -115,7 +115,7 @@ static void zero_out_memory(void) {
     while (true) {
         if (!addr)
             return;
-        addr -= 4096;
+        addr -= PAGE_SIZE;
 
         while (cur_mem_range_idx < g_pal_public_state.initial_mem_ranges_len
                 && addr < g_initial_mem_ranges[cur_mem_range_idx].start) {
@@ -130,14 +130,14 @@ static void zero_out_memory(void) {
             addr = g_initial_mem_ranges[cur_mem_range_idx].start;
             if (!addr)
                 return;
-            addr -= 4096;
+            addr -= PAGE_SIZE;
             cur_mem_range_idx++;
         }
 
         if (addr < (uintptr_t)g_pal_public_state.memory_address_start)
             return;
 
-        memset((void*)addr, 0, 4096);
+        memset((void*)addr, 0, PAGE_SIZE);
     }
 }
 
@@ -156,7 +156,7 @@ noreturn void pal_start_c(void) {
     wrmsr(MSR_IA32_GS_BASE, 0x0); /* just for sanity: no current-thread TCB at init */
 
     /* initialize alloc_align as early as possible, a lot of PAL APIs depend on this being set */
-    g_pal_public_state.alloc_align = PRESET_PAGESIZE;
+    g_pal_public_state.alloc_align = PAGE_SIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
 
     uint32_t num_cpus = rdfwcfg(FW_CFG_NB_CPUS, sizeof(uint32_t));

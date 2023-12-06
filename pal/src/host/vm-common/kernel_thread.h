@@ -16,8 +16,8 @@
 
 #include "kernel_sched.h"
 
-#define THREAD_STACK_SIZE (PRESET_PAGESIZE * 16) /* 64KB user stack */
-#define ALT_STACK_SIZE    (PRESET_PAGESIZE * 2)  /* 8KB signal stack */
+#define THREAD_STACK_SIZE (PAGE_SIZE * 16) /* 64KB user stack */
+#define ALT_STACK_SIZE    (PAGE_SIZE * 2)  /* 8KB signal stack */
 
 enum thread_state {
     THREAD_STOPPED,
