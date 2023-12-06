@@ -114,5 +114,8 @@ static inline noreturn void triple_fault(void) {
     __builtin_unreachable();
 }
 
+extern bool g_interrupts_enabled;
+
 void isr_c(struct isr_regs* regs);
+int send_invalidate_tlb_ipi_and_wait(void* addr, size_t size, bool invalidate_on_this_cpu);
 int interrupts_init(void);

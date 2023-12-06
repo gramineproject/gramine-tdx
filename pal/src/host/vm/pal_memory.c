@@ -15,10 +15,10 @@ int _PalVirtualMemoryAlloc(void* addr, size_t size, pal_prot_flags_t prot) {
     assert(WITHIN_MASK(prot, PAL_PROT_MASK));
     assert(addr);
 
-    /* FIXME: currently all PTEs are always RWX; we may want to modify PTEs here */
-    __UNUSED(prot);
-
-    return memory_alloc(addr, size);
+    bool read    = !!(prot & PAL_PROT_READ);
+    bool write   = !!(prot & (PAL_PROT_WRITE | PAL_PROT_WRITECOPY));
+    bool execute = !!(prot & PAL_PROT_EXEC);
+    return memory_alloc(addr, size, read, write, execute);
 }
 
 int _PalVirtualMemoryFree(void* addr, size_t size) {
@@ -30,12 +30,10 @@ int _PalVirtualMemoryProtect(void* addr, size_t size, pal_prot_flags_t prot) {
     assert(WITHIN_MASK(prot, PAL_PROT_MASK));
     assert(addr);
 
-    /* FIXME: currently all PTEs are always RWX; we may want to modify PTEs here */
-    __UNUSED(addr);
-    __UNUSED(size);
-    __UNUSED(prot);
-
-    return 0;
+    bool read    = !!(prot & PAL_PROT_READ);
+    bool write   = !!(prot & (PAL_PROT_WRITE | PAL_PROT_WRITECOPY));
+    bool execute = !!(prot & PAL_PROT_EXEC);
+    return memory_protect(addr, size, read, write, execute);
 }
 
 unsigned long _PalMemoryQuota(void) {

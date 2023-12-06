@@ -48,6 +48,7 @@ isr_\num:
     isrstub 19
     isrstub 20
     isrstub 32   // Local APIC timer interrupt (in TSC-deadline mode)
+    isrstub 33   // "Invalidate TLB" IPI interrupt (used when updating page table entries)
     isrstub 64   // virtio devices interrupt (console, fs, vsock)
 
 isr_spurious:
