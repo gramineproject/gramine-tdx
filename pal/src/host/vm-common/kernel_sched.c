@@ -130,7 +130,7 @@ static struct thread* find_next_thread(struct thread* curr_thread) {
 }
 
 void sched_thread_uninterruptable(struct isr_regs* userland_regs) {
-    uint64_t curr_gs_base = rdmsr(MSR_IA32_GS_BASE);
+    uint64_t curr_gs_base = replace_with_null_if_dummy_gs_base(rdmsr(MSR_IA32_GS_BASE));
     struct thread* curr_thread = curr_gs_base ? get_thread_ptr(curr_gs_base) : NULL;
 
     spinlock_lock(&g_thread_list_lock); /* will be unlocked during save_context */
@@ -161,7 +161,7 @@ void sched_thread_uninterruptable(struct isr_regs* userland_regs) {
 }
 
 void sched_thread(uint32_t* lock_to_unlock, int* clear_child_tid) {
-    uint64_t curr_gs_base = rdmsr(MSR_IA32_GS_BASE);
+    uint64_t curr_gs_base = replace_with_null_if_dummy_gs_base(rdmsr(MSR_IA32_GS_BASE));
     struct thread* curr_thread = curr_gs_base ? get_thread_ptr(curr_gs_base) : NULL;
 
     spinlock_lock_disable_irq(&g_thread_list_lock); /* will be unlocked during save_context */

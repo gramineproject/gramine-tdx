@@ -16,6 +16,10 @@
 #include "kernel_thread.h"
 #include "kernel_xsave.h"
 
+static struct pal_tcb_vm g_dummy_tcb = {
+    .common.stack_protector_canary = STACK_PROTECTOR_CANARY_DEFAULT
+};
+
 static int assign_new_tid(void) {
     static int tid = 0;
     return __atomic_add_fetch(&tid, 1, __ATOMIC_SEQ_CST);
@@ -88,9 +92,8 @@ noreturn void pal_common_thread_exit(int* clear_child_tid) {
     /* at this point, we are guaranteed to not use this thread_handle's fpregs aka XSAVE area */
     free(thread_handle->thread.fpregs);
 
-    /* get this thread_handle off the schedulable list; set GS=0x0 to skip saving its context */
+    /* get this thread_handle off the schedulable list */
     sched_thread_remove(&curr_tcb->kernel_thread);
-    wrmsr(MSR_IA32_GS_BASE, 0x0);
 
 	thread_free_stack_and_die(thread_handle->thread.stack, clear_child_tid);
     __builtin_unreachable();
@@ -137,4 +140,17 @@ struct thread* get_thread_ptr(uintptr_t curr_gs_base) {
 
 uintptr_t get_gs_base(struct thread* next_thread) {
     return (uintptr_t)next_thread - offsetof(struct pal_tcb_vm, kernel_thread);
+}
+
+/* In cases of (1) bootstrapping the VM and (2) receiving interrupts while current thread is
+ * terminating, a TCB in the GS register is meaningless, but GCC's stack protector will look for a
+ * canary at gs:[0x8], so let's install a dummy TCB inside GS with a default canary */
+__attribute_no_stack_protector
+void set_dummy_gs_base(void) {
+    wrmsr(MSR_IA32_GS_BASE, (uintptr_t)&g_dummy_tcb);
+}
+
+__attribute_no_stack_protector
+uintptr_t replace_with_null_if_dummy_gs_base(uintptr_t gs_base) {
+    return gs_base == (uintptr_t)&g_dummy_tcb ? 0 : gs_base;
 }
