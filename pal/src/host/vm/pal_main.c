@@ -150,10 +150,11 @@ noreturn static void print_usage_and_exit(void) {
 noreturn int pal_start_continue(void* cmdline_);
 
 /* called by `vm_bootloader.S` on kernel startup */
+__attribute_no_stack_protector
 noreturn void pal_start_c(void) {
     int ret;
 
-    wrmsr(MSR_IA32_GS_BASE, 0x0); /* just for sanity: no current-thread TCB at init */
+    set_dummy_gs_base();
 
     /* initialize alloc_align as early as possible, a lot of PAL APIs depend on this being set */
     g_pal_public_state.alloc_align = PAGE_SIZE;

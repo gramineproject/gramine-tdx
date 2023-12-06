@@ -264,8 +264,9 @@ int init_multicore(uint32_t num_cpus, void* hob_list_addr) {
 }
 
 /* called by `kernel_multicore.S` on AP startup; must not allocate heap memory! */
+__attribute_no_stack_protector
 noreturn void pal_start_ap_c(uint32_t cpu_idx) {
-    wrmsr(MSR_IA32_GS_BASE, 0x0); /* just for sanity: no current-thread TCB at init */
+    set_dummy_gs_base();
 
     /* BSP (main processor) created page table hierarchy, AP just needs to use it */
     __asm__ volatile("mov %%rax, %%cr3" : : "a"(g_pml4_table_base));
