@@ -11,7 +11,7 @@
 
 #include "kernel_thread.h"
 
-#define PIPE_BUF_SIZE PRESET_PAGESIZE
+#define PIPE_BUF_SIZE PAGE_SIZE
 
 struct pal_tcb_vm {
     PAL_TCB common;

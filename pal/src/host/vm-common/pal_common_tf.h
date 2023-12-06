@@ -36,7 +36,7 @@
 #include "list.h"
 #include "pal.h"
 
-#define TRUSTED_CHUNK_SIZE (PRESET_PAGESIZE * 4UL)
+#define TRUSTED_CHUNK_SIZE (PAGE_SIZE * 4UL)
 
 enum {
     FILE_CHECK_POLICY_STRICT = 0,
