@@ -50,10 +50,32 @@ extern void isr_18(void);
 extern void isr_19(void);
 extern void isr_20(void);
 extern void isr_32(void);
+extern void isr_33(void);
 extern void isr_64(void);
 extern void isr_spurious(void);
 
+/* can be accessed without atomics as there is only one CPU (BSP) that modifies it (at boot time),
+ * and afterwards it is read-only */
+bool g_interrupts_enabled = false;
+
 static struct idt_gate* g_idt = NULL; /* IDT with 256 partially filled gates, see *.S */
+
+/* A single "invalidate TLB" structure used when page table entries (PTEs) are updated by one vCPU.
+ * The vCPU populates this structure with mem region to invalidate, invalidates this region itself,
+ * sets `num_responses = 1` and sends an "invalidate TLB" IPI to other vCPUs via the LAPIC ICR.
+ * We have a single object protected by a single lock, so if two vCPUs must update PTEs, there is a
+ * performance hit of doing the two operations one after another. Also note that the whole
+ * "invalidate TLB" IPI protocol must be secure against missing/spurious/extra IPIs, as ICR is
+ * controlled by the untrusted host. */
+struct invalidate_tlb_request_t {
+    void* addr;
+    size_t size;
+    uint32_t num_responses; /* must be accessed atomically in interrupt handler of each vCPU */
+    bool in_progress;       /* must be accessed atomically in interrupt handler of each vCPU */
+};
+
+static struct invalidate_tlb_request_t g_invalidate_tlb_request;
+static spinlock_t g_invalidate_tlb_request_lock = INIT_SPINLOCK_UNLOCKED;
 
 void isr_c(struct isr_regs* regs) {
     int ret;
@@ -99,7 +121,38 @@ void isr_c(struct isr_regs* regs) {
                  * automatically during save_context / restore_context */
                 sched_thread_uninterruptable(regs);
             }
-            ret = 0;
+            break;
+        case 33: ;
+            /* "invalidate TLB" IPI -- may be spurious/extra, check for this */
+            if (get_per_cpu_data()->invalidate_tlb_ipi_received) {
+                /* ignore extra IPI (most probably there is a malicious host) */
+                break;
+            }
+            bool in_progress = __atomic_load_n(&g_invalidate_tlb_request.in_progress,
+                                               __ATOMIC_ACQUIRE);
+            if (!in_progress) {
+                /* ignore spurious IPI (most probably there is a malicious host) */
+                break;
+            }
+            uint32_t old_num_responses = __atomic_load_n(&g_invalidate_tlb_request.num_responses,
+                                                         __ATOMIC_ACQUIRE);
+            if (!old_num_responses) {
+                /* now this is weird -- some vCPU started the protocol but num of responses is 0 */
+                log_error("Panic: `invalidate TLB` IPI received, but state is inconsistent");
+                triple_fault();
+            }
+
+            void* addr  = __atomic_load_n(&g_invalidate_tlb_request.addr, __ATOMIC_ACQUIRE);
+            size_t size = __atomic_load_n(&g_invalidate_tlb_request.size, __ATOMIC_ACQUIRE);
+            uint64_t mark_addr = (uint64_t)addr;
+            while (mark_addr < (uint64_t)addr + size) {
+                invlpg(mark_addr);
+                mark_addr += PAGE_SIZE;
+            }
+
+            get_per_cpu_data()->invalidate_tlb_ipi_received = 1;
+            __atomic_fetch_add(&g_invalidate_tlb_request.num_responses, 1, __ATOMIC_ACQ_REL);
+            lapic_signal_interrupt_complete();
             break;
         case 64:
             assert(get_per_cpu_data()->cpu_id == 0);
@@ -119,6 +172,60 @@ void isr_c(struct isr_regs* regs) {
             log_error("       rip=0x%lx rsp=0x%lx rax=0x%lx", regs->rip, regs->rsp, regs->rax);
             triple_fault();
     }
+}
+
+int send_invalidate_tlb_ipi_and_wait(void* addr, size_t size, bool invalidate_on_this_cpu) {
+    assert(IS_ALIGNED_PTR(addr, PAGE_SIZE) && IS_ALIGNED(size, PAGE_SIZE));
+
+    int ret;
+
+    if (invalidate_on_this_cpu) {
+        uint64_t mark_addr = (uint64_t)addr;
+        while (mark_addr < (uint64_t)addr + size) {
+            invlpg(mark_addr);
+            mark_addr += PAGE_SIZE;
+        }
+    }
+
+    if (!g_interrupts_enabled) {
+        /* this func may be called from bootstrap code, before interrupts are truly enabled */
+        return 0;
+    }
+
+    spinlock_lock(&g_invalidate_tlb_request_lock);
+
+    if (g_invalidate_tlb_request.in_progress || g_invalidate_tlb_request.num_responses) {
+        /* sanity check that a previous "invalidate TLB" protocol run is finished */
+        ret = -PAL_ERROR_DENIED;
+        goto out;
+    }
+
+    for (uint32_t i = 0; i < g_num_cpus; i++) {
+        /* reset the "IPI received" flag on each vCPU */
+        g_per_cpu_data[i].invalidate_tlb_ipi_received = 0;
+    }
+
+    g_invalidate_tlb_request.in_progress = true;
+    g_invalidate_tlb_request.addr = addr;
+    g_invalidate_tlb_request.size = size;
+    g_invalidate_tlb_request.num_responses = 1; /* this vCPU already invalidated */
+
+    uint64_t icr_ipi_request = (/*destination=all_excluding_self*/3 << 18) + /*vector=*/33;
+    vm_shared_wrmsr(MSR_INSECURE_IA32_LAPIC_ICR, icr_ipi_request);
+
+    while (__atomic_load_n(&g_invalidate_tlb_request.num_responses, __ATOMIC_ACQUIRE)
+            != g_num_cpus) {
+        /* waiting for other vCPUs to invalidate their TLBs and acknowledge */
+        CPU_RELAX();
+    }
+
+    g_invalidate_tlb_request.num_responses = 0;
+    g_invalidate_tlb_request.in_progress = false;
+    ret = 0;
+
+out:
+    spinlock_unlock(&g_invalidate_tlb_request_lock);
+    return ret;
 }
 
 static int idt_gate_set(uint8_t isr_number, void* isr_addr) {
@@ -263,6 +370,10 @@ static int idt_init(void) {
         return -PAL_ERROR_BADADDR;
 
     ret = idt_gate_set(32, &isr_32); /* Local APIC timer IRQ */
+    if (ret < 0)
+        return -PAL_ERROR_BADADDR;
+
+    ret = idt_gate_set(33, &isr_33); /* "Invalidate TLB" IPI interrupt */
     if (ret < 0)
         return -PAL_ERROR_BADADDR;
 

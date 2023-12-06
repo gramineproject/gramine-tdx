@@ -21,6 +21,8 @@
 
 #include "kernel_interrupts.h"
 #include "kernel_memory.h"
+#include "kernel_multicore.h"
+#include "kernel_virtio.h"
 
 static_assert(PAGE_SIZE == 4096, "unexpected PAGE_SIZE (expected 4K)");
 
@@ -57,30 +59,64 @@ int memory_free_shared_region(void* addr, size_t size) {
 int memory_find_page_table_entry(uint64_t addr, uint64_t** out_pte_addr) {
     uint64_t* pml4_table = (uint64_t*)g_pml4_table_base;
 
+    /* the mask covers bits 12:43 which covers the address space [0, 16TB); note that we do not
+     * cover up to 12:51 because bit 47 or 51 can be specially used (e.g. "shared" bit in TDX) */
+    const uint64_t page_table_entry_addr_mask = 0x00000ffffffff000UL;
+
     /* there is a single entry in the PML4 table, see also memory_pagetables_init();
      * in this entry, bits 12:51 contain the address of the PDPT table */
-    uint64_t* pdpt_table = (uint64_t*)(pml4_table[0] & 0x000ffffffffff000UL);
+    uint64_t* pdpt_table = (uint64_t*)(pml4_table[0] & page_table_entry_addr_mask);
 
     /* each PDPT table entry covers 1GB of memory, starting from addr 0x00 */
     size_t pdpt_table_idx = addr / 1024 / 1024 / 1024;
-    uint64_t* pd_table = (uint64_t*)(pdpt_table[pdpt_table_idx] & 0x000ffffffffff000UL);
+    uint64_t* pd_table = (uint64_t*)(pdpt_table[pdpt_table_idx] & page_table_entry_addr_mask);
 
     /* each PD table entry covers 2MB of memory in the 1GB memory region determined via PDPT table
      * entry (recall that there are 512 PD entries in one PD table) */
     size_t pd_table_idx = (addr / 1024 / 1024 / 2) % 512;
-    uint64_t* pt_table = (uint64_t*)(pd_table[pd_table_idx] & 0x000ffffffffff000UL);
+    uint64_t* pt_table = (uint64_t*)(pd_table[pd_table_idx] & page_table_entry_addr_mask);
 
     /* each PT table entry covers 4KB of memory in the 2MB memory region determined via PD table
      * entry (recall that there are 512 PD entries in one PT table) */
     size_t pt_table_idx = (addr / 1024 / 4) % 512;
 
     /* sanity check: must arrive at the same page address as in `addr` */
-    uint64_t page_addr = pt_table[pt_table_idx] & 0x000ffffffffff000UL;
-    if ((addr & 0x000ffffffffff000UL) != page_addr)
+    uint64_t page_addr = pt_table[pt_table_idx] & page_table_entry_addr_mask;
+    if ((addr & page_table_entry_addr_mask) != page_addr)
         return -PAL_ERROR_INVAL;
 
     *out_pte_addr = &pt_table[pt_table_idx];
     return 0;
+}
+
+int memory_mark_pages_off(uint64_t addr, size_t size) {
+    for (uint64_t mark_addr = addr; mark_addr < addr + size; mark_addr += PAGE_SIZE) {
+        uint64_t* pte_addr;
+        int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
+        if (ret < 0)
+            return ret;
+        *pte_addr &= ~1UL;
+    }
+    return send_invalidate_tlb_ipi_and_wait((void*)addr, size, /*invalidate_on_this_cpu=*/true);
+}
+
+int memory_mark_pages_on(uint64_t addr, size_t size, bool write, bool execute, bool usermode) {
+    for (uint64_t mark_addr = addr; mark_addr < addr + size; mark_addr += PAGE_SIZE) {
+        uint64_t* pte_addr;
+        int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
+        if (ret < 0)
+            return ret;
+
+        uint64_t bits = 1UL; /* present bit is always set, since page is at least readable */
+        if (write)
+            bits |= 1UL << 1;
+        if (usermode)
+            bits |= 1UL << 2;
+        if (!execute)
+            bits |= 1UL << 63; /* NX/XD bit */
+        *pte_addr = (*pte_addr & ~((1UL << 63) + 7UL)) | bits;
+    }
+    return send_invalidate_tlb_ipi_and_wait((void*)addr, size, /*invalidate_on_this_cpu=*/true);
 }
 
 int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark) {
@@ -94,18 +130,19 @@ int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark) 
             *pte_addr |= 1UL << 4; /* PCD = Page-level cache disable */
         else
             *pte_addr &= ~(1UL << 4);
-
-        /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
-        invlpg(mark_addr);
     }
-    return 0;
+    return send_invalidate_tlb_ipi_and_wait((void*)addr, size, /*invalidate_on_this_cpu=*/true);
 }
 
 /* sets up the new page tables hierarchy (with 4KB pages) to cover memory range [0x0, memory_size);
  * page tables have 1:1 virtual-to-physical address translation */
 static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t page_tables_size,
                            uint64_t* out_pml4_table_base) {
-    uint64_t flags = 0x7; /* User, Writable, Present */
+    /* all memory is initially accessible only from kernel mode (ring 0), RW and present */
+    uint64_t leaf_flags = 0x3;
+
+    /* for MMU traversal in user mode, mid-tree entries must be accessible also in ring-3 */
+    uint64_t tree_flags = 0x7;
 
     size_t pages_4k_cnt = memory_size / (4 * 1024);
     size_t pages_2m_cnt = memory_size / (2 * 1024 * 1024);
@@ -125,7 +162,7 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
     /* page tables with PTE leaf entries */
     uint64_t page_tables_base = ptr;
     for (size_t i = 0; i < pages_4k_cnt; i++) {
-        uint64_t entry = ((ptr - page_tables_base) / 8) * PAGE_SIZE + flags;
+        uint64_t entry = ((ptr - page_tables_base) / 8) * PAGE_SIZE + leaf_flags;
         memcpy((void*)ptr, &entry, sizeof(entry));
         ptr += sizeof(entry);
     }
@@ -136,7 +173,8 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
     /* page directory tables with PDE entries */
     uint64_t page_dir_tables_base = ptr;
     for (size_t i = 0; i < pages_2m_cnt; i++) {
-        uint64_t entry = page_tables_base + ((ptr - page_dir_tables_base) / 8) * PAGE_SIZE + flags;
+        uint64_t entry = page_tables_base + ((ptr - page_dir_tables_base) / 8) * PAGE_SIZE
+                                          + tree_flags;
         memcpy((void*)ptr, &entry, sizeof(entry));
         ptr += sizeof(entry);
     }
@@ -147,7 +185,8 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
     /* one PDP page with up to 512 PDPE entries */
     uint64_t pdp_table_base = ptr;
     for (size_t i = 0; i < pages_1g_cnt; i++) {
-        uint64_t entry = page_dir_tables_base + ((ptr - pdp_table_base) / 8) * PAGE_SIZE + flags;
+        uint64_t entry = page_dir_tables_base + ((ptr - pdp_table_base) / 8) * PAGE_SIZE
+                                              + tree_flags;
         memcpy((void*)ptr, &entry, sizeof(entry));
         ptr += sizeof(entry);
     }
@@ -155,7 +194,7 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
 
     /* one PML4 page with a single PML4E entry */
     uint64_t pml4_table_base = ptr;
-    uint64_t entry = (uint64_t)pdp_table_base + flags;
+    uint64_t entry = (uint64_t)pdp_table_base + tree_flags;
     memcpy((void*)ptr, &entry, sizeof(entry));
 
     __asm__ volatile("mov %%rax, %%cr3" : : "a"(pml4_table_base));
@@ -266,6 +305,47 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
     return 0;
 }
 
+/* a counterpart to memory_preload_ranges(), must be executed after all PAL VM initialization is
+ * done; we tighten page permissions on PAL-kernel specific memory regions, see the list in
+ * memory_preload_ranges() above */
+int memory_tighten_permissions(void) {
+    int ret;
+
+    /*
+     * [0, 1MB): Legacy DOS (includes DOS area, SMM memory, System BIOS). We could not disable these
+     *           pages at PAL init, because a sub-region was used for AP multicore init code/stack.
+     */
+    ret = memory_mark_pages_off(0x0UL, 0x100000UL);
+    if (ret < 0)
+        return ret;
+    /*
+     * [512MB, 648MB): Page tables. Should be RW (to allow page-permission changes), but accessible
+     *                 only from ring-0 (no usermode) and cannot be executed.
+     */
+    ret = memory_mark_pages_on(PAGE_TABLES_ADDR, PAGE_TABLES_SIZE, /*write=*/true,
+                               /*execute=*/false, /*usermode=*/false);
+    if (ret < 0)
+        return ret;
+    /*
+     * [648MB, 896MB): Shared memory for virtqueues and for Quote (in TDX case). Same as PTs.
+     */
+    ret = memory_mark_pages_on(SHARED_MEM_ADDR, SHARED_MEM_SIZE, /*write=*/true,
+                               /*execute=*/false, /*usermode=*/false);
+    if (ret < 0)
+        return ret;
+    /*
+     * [2GB, 3GB): Memory hole (QEMU doesn't map any memory here),
+     * [3GB, 4GB): PCI (includes BARs, LAPIC, IOAPIC).
+     *
+     * NOTE: We would need to perform the following logic: disable the whole region, with exceptions
+     * of virtio drivers' (1) interrupt status reg, and (2) RQ/TQ notify addresses. This logic is
+     * complicated, and environments like Intel TDX do not allow direct MMIO access anyway, so we
+     * don't disable this hole/PCI region as it doesn't affect security.
+     */
+
+    return 0;
+}
+
 int memory_init(e820_table_entry* e820_entries, size_t e820_entries_size,
                 void** out_memory_address_start, void** out_memory_address_end) {
     assert(e820_entries_size % sizeof(*e820_entries) == 0);
@@ -299,15 +379,42 @@ int memory_init(e820_table_entry* e820_entries, size_t e820_entries_size,
     return 0;
 }
 
-int memory_alloc(void* addr, size_t size) {
+int memory_alloc(void* addr, size_t size, bool read, bool write, bool execute) {
     if ((uintptr_t)addr < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
             SHARED_MEM_ADDR < (uintptr_t)addr + size) {
         /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
         return -PAL_ERROR_DENIED;
     }
 
+    if (!read && !write && !execute) {
+        memory_mark_pages_off((uint64_t)addr, size);
+        return 0;
+    }
+
+    /* we rely on CR0.WP == 0 (Write Protect disabled), which allows to write even into read-only
+     * pages in ring 0 (otherwise for read-only allocs, we would need to call below function twice:
+     * once with W permission, and after memset-to-zero again, without W permission) */
+    int ret = memory_mark_pages_on((uint64_t)addr, size, write, execute, /*usermode=*/true);
+    if (ret < 0)
+        return ret;
+
     memset(addr, 0, size);
     return 0;
+}
+
+int memory_protect(void* addr, size_t size, bool read, bool write, bool execute) {
+    if ((uintptr_t)addr < SHARED_MEM_ADDR + SHARED_MEM_SIZE &&
+            SHARED_MEM_ADDR < (uintptr_t)addr + size) {
+        /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
+        return -PAL_ERROR_DENIED;
+    }
+
+    if (!read && !write && !execute) {
+        memory_mark_pages_off((uint64_t)addr, size);
+        return 0;
+    }
+
+    return memory_mark_pages_on((uint64_t)addr, size, write, execute, /*usermode=*/true);
 }
 
 int memory_free(void* addr, size_t size) {
@@ -316,5 +423,6 @@ int memory_free(void* addr, size_t size) {
         /* [addr, addr+size) at least partially overlaps shared memory, should be impossible */
         return -PAL_ERROR_DENIED;
     }
-    return 0;
+
+    return memory_mark_pages_off((uint64_t)addr, size);
 }

@@ -117,8 +117,41 @@ static int tsc_frequency_init(void) {
 }
 
 static int add_preloaded_range(uintptr_t addr, size_t size, const char* comment) {
-    /* FIXME: use proper prot flags for preloaded (excluded from memory allocation) ranges? */
     return pal_add_initial_range(addr, size, /*pal_prot=*/0, comment);
+}
+
+static void prot_none_memory(void) {
+    extern struct pal_initial_mem_range g_initial_mem_ranges[];
+
+    uint64_t cur_mem_range_idx = 0;
+    uintptr_t addr = (uintptr_t)g_pal_public_state.memory_address_end;
+    while (true) {
+        if (!addr)
+            return;
+        addr -= PAGE_SIZE;
+
+        while (cur_mem_range_idx < g_pal_public_state.initial_mem_ranges_len
+                && addr < g_initial_mem_ranges[cur_mem_range_idx].start) {
+            /* skip too-high mem ranges; we rely on mem ranges to be sorted in desc order */
+            cur_mem_range_idx++;
+        }
+
+        while (cur_mem_range_idx < g_pal_public_state.initial_mem_ranges_len
+                && addr >= g_initial_mem_ranges[cur_mem_range_idx].start
+                && addr <  g_initial_mem_ranges[cur_mem_range_idx].end) {
+            /* jump over a mem range; we rely on mem ranges to be sorted in desc order */
+            addr = g_initial_mem_ranges[cur_mem_range_idx].start;
+            if (!addr)
+                return;
+            addr -= PAGE_SIZE;
+            cur_mem_range_idx++;
+        }
+
+        if (addr < (uintptr_t)g_pal_public_state.memory_address_start)
+            return;
+
+        (void)memory_mark_pages_off(addr, PAGE_SIZE);
+    }
 }
 
 /* note that manifest_size is the *file* size, i.e. it is the length of the `manifest` C string */
@@ -239,6 +272,12 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     if (ret < 0)
         INIT_FAIL("Failed to initialize preloaded ranges");
 
+    /* memory_pagetables_init() marked all pages as RWX, now is good time to revert to NONE. */
+    /* FIXME: whole PAL binary is RWX because memory_pagetables_init() marked everything as RWX and
+     *        prot_none_memory() does *not* modify perms for PAL binary memory pages since it is
+     *        part of "preloaded ranges" */
+    prot_none_memory();
+
     ret = shared_memory_init(gpa_width);
     if (ret < 0)
         INIT_FAIL("Failed to initialize shared TDX memory");
@@ -288,6 +327,10 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
         INIT_FAIL("Failed to initialize virtio-console driver");
     if (!g_fs)
         INIT_FAIL("Failed to initialize virtio-fs driver");
+
+    ret = memory_tighten_permissions();
+    if (ret < 0)
+        INIT_FAIL("Failed to tighten memory permissions after initialization");
 
     /* read VMM (untrusted) inputs: gramine args, environment variables and host's PWD from fw_cfg
      * QEMU pseudo-device, see also kernel_vmm_inputs.h */
