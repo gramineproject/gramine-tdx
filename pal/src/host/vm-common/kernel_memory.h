@@ -28,7 +28,6 @@ void* memory_get_shared_region(size_t size);
 int memory_free_shared_region(void* addr, size_t size);
 
 int memory_find_page_table_entry(uint64_t addr, uint64_t** out_pte_addr);
-int memory_mark_pages_present(uint64_t addr, size_t size, bool present);
 int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark);
 
 int memory_pagetables_init(void* memory_address_end, bool current_page_tables_cover_1gb);

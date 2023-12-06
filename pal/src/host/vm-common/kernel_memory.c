@@ -83,46 +83,20 @@ int memory_find_page_table_entry(uint64_t addr, uint64_t** out_pte_addr) {
     return 0;
 }
 
-int memory_mark_pages_present(uint64_t addr, size_t size, bool present) {
-    uint64_t mark_addr = addr;
-    while (mark_addr < addr + size) {
-        uint64_t* pte_addr;
-        int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
-        if (ret < 0)
-            return ret;
-
-        /* set or clear bit 0 (P = Present) */
-        if (present)
-            *pte_addr |= 1UL;
-        else
-            *pte_addr &= ~1UL;
-
-        /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
-        invlpg(mark_addr);
-
-        mark_addr += PAGE_SIZE;
-    }
-    return 0;
-}
-
 int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark) {
-    uint64_t mark_addr = addr;
-    while (mark_addr < addr + size) {
+    for (uint64_t mark_addr = addr; mark_addr < addr + size; mark_addr += PAGE_SIZE) {
         uint64_t* pte_addr;
         int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
         if (ret < 0)
             return ret;
 
-        /* set or clear bit 4 (PCD = Page-level cache disable) */
         if (mark)
-            *pte_addr |= 1UL << 4;
+            *pte_addr |= 1UL << 4; /* PCD = Page-level cache disable */
         else
             *pte_addr &= ~(1UL << 4);
 
         /* NOTE: if the page may be in TLB of other CPUs, the caller must perform TLB shootdown */
         invlpg(mark_addr);
-
-        mark_addr += PAGE_SIZE;
     }
     return 0;
 }
