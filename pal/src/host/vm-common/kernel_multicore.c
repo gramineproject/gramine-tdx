@@ -207,14 +207,8 @@ int init_multicore(uint32_t num_cpus, void* hob_list_addr) {
         return -PAL_ERROR_DENIED;
     }
 
-    /* Copy asm code of AP (Application Processors) startup to lower 1MB in memory; before copying
-     * we must make sure the memory region is marked as present and after copying we must mark it as
-     * strong uncacheable, according to Intel SDM, Vol. 3A, Section 9.4.4.1. */
-    ret = memory_mark_pages_present(AP_STARTUP_PAGE_ADDRESS, AP_STARTUP_PAGE_SIZE,
-                                    /*present=*/true);
-    if (ret < 0)
-        return ret;
-
+    /* Copy asm code of AP (Application Processors) startup to lower 1MB in memory; after copying we
+     * must mark it as strong uncacheable, according to Intel SDM, Vol. 3A, Section 9.4.4.1. */
     memcpy((void*)AP_STARTUP_PAGE_ADDRESS, &ap_startup_page_start, AP_STARTUP_PAGE_SIZE);
 
     uint32_t* g_lock_single_ap_cpu_addr = &g_lock_single_ap_cpu;
