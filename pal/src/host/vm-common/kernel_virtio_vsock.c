@@ -804,18 +804,14 @@ static int process_packet(struct virtio_vsock_packet* packet) {
         goto out;
     }
 
-    if (packet->header.op == VIRTIO_VSOCK_OP_RST) {
-        cleanup_connection(conn);
-        ret = -PAL_ERROR_DENIED;
-        goto out;
-    }
-
     g_vsock->peer_fwd_cnt   = packet->header.fwd_cnt;
     g_vsock->peer_buf_alloc = packet->header.buf_alloc;
 
     switch (conn->state) {
         case VIRTIO_VSOCK_LISTEN:
             if (packet->header.op != VIRTIO_VSOCK_OP_REQUEST) {
+                if (packet->header.op == VIRTIO_VSOCK_OP_RST)
+                    cleanup_connection(conn);
                 ret = -PAL_ERROR_DENIED;
                 goto out;
             }
@@ -847,6 +843,8 @@ static int process_packet(struct virtio_vsock_packet* packet) {
 
         case VIRTIO_VSOCK_CONNECT:
             if (packet->header.op != VIRTIO_VSOCK_OP_RESPONSE) {
+                if (packet->header.op == VIRTIO_VSOCK_OP_RST)
+                    cleanup_connection(conn);
                 ret = -PAL_ERROR_DENIED;
                 goto out;
             }
@@ -858,8 +856,13 @@ static int process_packet(struct virtio_vsock_packet* packet) {
         case VIRTIO_VSOCK_ESTABLISHED:
             switch (packet->header.op) {
                 case VIRTIO_VSOCK_OP_RW:
-                    ret = recv_rw_packet(conn, packet);
-                    packet_ownership_transferred = ret < 0 ? false : true;
+                    if (conn->recv_disallowed) {
+                        /* we were instructed to not receive more packets, silently drop packet */
+                        ret = 0;
+                    } else {
+                        ret = recv_rw_packet(conn, packet);
+                        packet_ownership_transferred = ret < 0 ? false : true;
+                    }
                     goto out;
                 case VIRTIO_VSOCK_OP_CREDIT_REQUEST:
                     ret = send_credit_update_packet(conn);
@@ -869,21 +872,37 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                     ret = 0;
                     goto out;
                 case VIRTIO_VSOCK_OP_SHUTDOWN:
-                    /* FIXME: we do not look at packet.header.flags currently */
-                    send_reset_packet(conn); /* notify host that we ack this shutdown cleanly */
-                    conn->state = VIRTIO_VSOCK_CLOSING;
-                    thread_wakeup_vsock(/*is_read=*/false);
+                    if (packet->header.flags == VIRTIO_VSOCK_SHUTDOWN_RCV
+                            || packet->header.flags == VIRTIO_VSOCK_SHUTDOWN_COMPLETE) {
+                        conn->send_disallowed = true;
+                    }
+                    if (packet->header.flags == VIRTIO_VSOCK_SHUTDOWN_SEND
+                            || packet->header.flags == VIRTIO_VSOCK_SHUTDOWN_COMPLETE) {
+                        conn->recv_disallowed = true;
+                    }
+                    if (conn->recv_disallowed && conn->send_disallowed) {
+                        /* notify host that we ack this shutdown cleanly */
+                        send_reset_packet(conn);
+                    }
                     ret = 0;
                     goto out;
+                case VIRTIO_VSOCK_OP_RST:
+                    if (conn->recv_disallowed && conn->send_disallowed) {
+                        /* clean shutdown happened, now we can safely ignore RSTs from peer */
+                        ret = 0;
+                        goto out;
+                    }
+                    cleanup_connection(conn);
+                    /* fallthrough */
                 default:
                     ret = -PAL_ERROR_DENIED;
                     goto out;
             }
 
         case VIRTIO_VSOCK_CLOSING:
-            if (packet->header.op != VIRTIO_VSOCK_OP_SHUTDOWN) {
-                ret = -PAL_ERROR_DENIED;
-                goto out;
+            if (packet->header.op == VIRTIO_VSOCK_OP_RST) {
+                /* we initiated full shutdown, wait for RST and ignore all other packets */
+                cleanup_connection(conn); /* moves to CLOSE state */
             }
             ret = 0;
             goto out;
@@ -1518,6 +1537,11 @@ long virtio_vsock_read(int sockfd, void* buf, size_t count) {
     }
 
     if (conn->prepared_for_user == conn->consumed_by_user) {
+        if (conn->recv_disallowed) {
+            /* we were instructed that there will be no more packets, so return "end-of-file" */
+            ret = 0;
+            goto out;
+        }
         /* non-blocking caller must return TRYAGAIN; blocking caller must sleep on this */
         ret = -PAL_ERROR_TRYAGAIN;
         goto out;
@@ -1576,6 +1600,12 @@ long virtio_vsock_write(int sockfd, const void* buf, size_t count) {
         goto out;
     }
 
+    if (conn->send_disallowed) {
+        /* we were instructed to not send more packets, return -EPIPE type of error */
+        ret = -PAL_ERROR_CONNFAILED_PIPE;
+        goto out;
+    }
+
     /* must be after all checks on connection, otherwise could return success on broken conn */
     if (count == 0) {
         ret = 0;
@@ -1607,7 +1637,7 @@ out:
     return ret;
 }
 
-static int virtio_vsock_shutdown_common(struct virtio_vsock_connection* conn, uint64_t timeout_us) {
+static int virtio_vsock_close_common(struct virtio_vsock_connection* conn, uint64_t timeout_us) {
     assert(spinlock_is_locked(&g_vsock_connections_lock));
 
     int ret;
@@ -1670,15 +1700,11 @@ out:
     return ret;
 }
 
-int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
+int virtio_vsock_shutdown(int sockfd, enum virtio_vsock_shutdown shutdown) {
     int ret;
-    __UNUSED(how);
 
     if (sockfd < 0)
         return -PAL_ERROR_BADHANDLE;
-
-    if (timeout_us == 0)
-        return -PAL_ERROR_INVAL;
 
     spinlock_lock(&g_vsock_connections_lock);
 
@@ -1688,7 +1714,17 @@ int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
         goto out;
     }
 
-    ret = virtio_vsock_shutdown_common(conn, timeout_us);
+    if (conn->state != VIRTIO_VSOCK_ESTABLISHED && conn->state != VIRTIO_VSOCK_LISTEN) {
+        ret = -PAL_ERROR_NOTCONNECTION;
+        goto out;
+    }
+
+    if (shutdown == VIRTIO_VSOCK_SHUTDOWN_RCV || shutdown == VIRTIO_VSOCK_SHUTDOWN_COMPLETE)
+        conn->recv_disallowed = true;
+    if (shutdown == VIRTIO_VSOCK_SHUTDOWN_SEND || shutdown == VIRTIO_VSOCK_SHUTDOWN_COMPLETE)
+        conn->send_disallowed = true;
+
+    ret = send_shutdown_packet(conn, shutdown);
 out:
     spinlock_unlock(&g_vsock_connections_lock);
     return ret;
@@ -1710,7 +1746,7 @@ int virtio_vsock_close(int sockfd, uint64_t timeout_us) {
 
     ret = 0;
     if (conn->state != VIRTIO_VSOCK_CLOSE) {
-        ret = virtio_vsock_shutdown_common(conn, timeout_us);
+        ret = virtio_vsock_close_common(conn, timeout_us);
     }
 
     remove_connection(conn);
