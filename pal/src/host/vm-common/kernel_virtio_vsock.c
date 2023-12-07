@@ -97,6 +97,7 @@ static spinlock_t g_vsock_receive_lock = INIT_SPINLOCK_UNLOCKED;
 static spinlock_t g_vsock_transmit_lock = INIT_SPINLOCK_UNLOCKED;
 static spinlock_t g_vsock_connections_lock = INIT_SPINLOCK_UNLOCKED;
 
+static int cleanup_tq(void);
 static int process_packet(struct virtio_vsock_packet* packet);
 static void remove_connection(struct virtio_vsock_connection* conn);
 
@@ -240,8 +241,22 @@ static int copy_into_tq_and_free(struct virtio_vsock_packet* packet) {
     uint16_t desc_idx;
     uint64_t packet_size = sizeof(struct virtio_vsock_hdr) + packet->header.size;
     int ret = virtq_alloc_desc(g_vsock->tq, /*addr=*/NULL, packet_size, /*flags=*/0, &desc_idx);
-    if (ret < 0)
-        goto out;
+    if (ret < 0) {
+        /* if TQ buffer is full, drain TQ and try again */
+        if (ret != -PAL_ERROR_NOMEM)
+            goto out;
+
+        spinlock_unlock(&g_vsock_transmit_lock);
+        (void)cleanup_tq();
+        spinlock_lock(&g_vsock_transmit_lock);
+
+        ret = virtq_alloc_desc(g_vsock->tq, /*addr=*/NULL, packet_size, /*flags=*/0, &desc_idx);
+        if (ret < 0) {
+            log_warning("TX vsock queue is full, dropping outgoing RW packet (payload size %lu)",
+                        packet_size);
+            goto out;
+        }
+    }
 
     copy_into_tq_internal(packet, packet_size, desc_idx);
     ret = 0;
@@ -707,7 +722,7 @@ static int recv_rw_packet(struct virtio_vsock_connection* conn,
 
     uint32_t in_flight_packets_cnt = conn->prepared_for_user - conn->consumed_by_user;
     if (in_flight_packets_cnt >= VSOCK_MAX_PACKETS) {
-        log_warning("RX vsock queue is full, have to drop incoming RW packet (payload size %u)",
+        log_warning("RX vsock queue is full, dropping incoming RW packet (payload size %u)",
                      packet->header.size);
         return -PAL_ERROR_NOMEM;
     }
