@@ -135,6 +135,10 @@ struct virtio_vsock_connection {
     uint32_t prepared_for_user;
     uint32_t consumed_by_user;
 
+    /* receive/send is disallowed on this connection (depends on received SHUTDOWN requests) */
+    bool recv_disallowed;
+    bool send_disallowed;
+
     /* below three fields needed to correctly support dualstack (only IPv4, only IPv6 or both);
      * note that all packets will actually be received/sent on only one of the dualstack sockets
      * (the first of the sockets to be bound to the same port) */

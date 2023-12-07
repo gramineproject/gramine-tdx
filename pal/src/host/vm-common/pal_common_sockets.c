@@ -515,10 +515,7 @@ static int pal_common_tcp_delete(struct pal_handle* handle, enum pal_delete_mode
             return -PAL_ERROR_INVAL;
     }
 
-    int ret = virtio_vsock_shutdown(handle->sock.fd, shutdown, VSOCK_CLOSE_TIMEOUT_US);
-
-    /* maybe some other thread was waiting on this socket, notify waiting events (select/poll) */
-    sched_thread_wakeup(&g_streams_waiting_events_futex);
+    int ret = virtio_vsock_shutdown(handle->sock.fd, shutdown);
 
     spinlock_unlock(&handle->sock.lock);
     return ret;

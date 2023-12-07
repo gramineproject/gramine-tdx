@@ -374,7 +374,7 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
 int virtio_vsock_listen(int sockfd, int backlog);
 int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen);
 int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t timeout_us);
-int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us);
+int virtio_vsock_shutdown(int sockfd, enum virtio_vsock_shutdown shutdown);
 int virtio_vsock_close(int sockfd, uint64_t timeout_us);
 long virtio_vsock_peek(int sockfd);
 long virtio_vsock_read(int sockfd, void* buf, size_t count);
