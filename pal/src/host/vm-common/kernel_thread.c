@@ -7,7 +7,7 @@
  * Also implements idle and bottomhalves thread loops.
  *
  * Notes on multi-core synchronization:
- *   - thread_get_stack() and thread_free_stack_and_die() sync via thread-stack lock
+ *   - thread_get_stack_and_fpregs() and thread_free_stack_and_die() sync via thread-stack lock
  *   - thread_setup() and thread_helper_create() are thread-safe, operate on args and locally
  *     allocated vars, no sync required
  *    - thread_idle_run() doesn't use any global state
@@ -27,9 +27,9 @@
 
 /* We cannot just use malloc/free to allocate/free thread stacks because thread-exit routine needs
  * to execute on the stack and thus can't execute free (it would execute with no stack after such
- * call). Thus, we resort to recycling thread stacks allocated by previous threads and not used
- * anymore. This still leaks memory but at least it is bounded by the max number of simultaneously
- * executing threads. */
+ * call). Thus, we resort to recycling thread stacks (and fpregs memory regions allocated together
+ * with the stack) allocated by previous threads and not used anymore. This still leaks memory but
+ * at least it is bounded by the max number of simultaneously executing threads. */
 struct thread_stack_map_t {
     void* stack;
     bool  used;
@@ -40,14 +40,17 @@ static size_t g_thread_stack_num  = 0;
 static size_t g_thread_stack_size = 0;
 static spinlock_t g_thread_stack_lock = INIT_SPINLOCK_UNLOCKED;
 
-void* thread_get_stack(void) {
-    void* ret = NULL;
+int thread_get_stack_and_fpregs(void** out_stack, void** out_fpregs) {
+    int ret;
+    void* stack_base = NULL;
+
     spinlock_lock(&g_thread_stack_lock);
     for (size_t i = 0; i < g_thread_stack_num; i++) {
         if (!g_thread_stack_map[i].used) {
-            /* found allocated and unused stack -- use it */
+            /* found allocated and unused stack + fpregs -- use it */
             g_thread_stack_map[i].used = true;
-            ret = g_thread_stack_map[i].stack;
+            stack_base = g_thread_stack_map[i].stack;
+            ret = 0;
             goto out;
         }
     }
@@ -56,28 +59,44 @@ void* thread_get_stack(void) {
         /* realloc g_thread_stack_map to accommodate more objects (includes the very first time) */
         g_thread_stack_size += 8;
         struct thread_stack_map_t* tmp = malloc(g_thread_stack_size * sizeof(*tmp));
-        if (!tmp)
+        if (!tmp) {
+            ret = -PAL_ERROR_NOMEM;
             goto out;
+        }
 
         memcpy(tmp, g_thread_stack_map, g_thread_stack_num * sizeof(*tmp));
         free(g_thread_stack_map);
         g_thread_stack_map = tmp;
     }
 
-    ret = malloc(THREAD_STACK_SIZE + ALT_STACK_SIZE);
-    if (!ret)
+    /* allocate both the stack and the fpregs (XSAVE) memory region in one go; note that
+     * fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
+    assert(g_xsave_size);
+    stack_base = malloc(THREAD_STACK_SIZE + ALT_STACK_SIZE + g_xsave_size + VM_XSAVE_ALIGN);
+    if (!stack_base) {
+        ret = -PAL_ERROR_NOMEM;
         goto out;
+    }
 
-    g_thread_stack_map[g_thread_stack_num].stack = ret;
+    g_thread_stack_map[g_thread_stack_num].stack = stack_base;
     g_thread_stack_map[g_thread_stack_num].used  = true;
     g_thread_stack_num++;
+
+    ret = 0;
+
 out:
+    if (ret == 0) {
+        assert(stack_base);
+        *out_stack  = stack_base;
+        *out_fpregs = stack_base + THREAD_STACK_SIZE + ALT_STACK_SIZE;
+    }
     spinlock_unlock(&g_thread_stack_lock);
     return ret;
 }
 
 noreturn void thread_free_stack_and_die(void* thread_stack, int* clear_child_tid) {
-    /* we do not free thread stack but instead mark it as recycled, see thread_get_stack() */
+    /* we do not free thread stack (and fpregs memory region allocated with it) but instead mark it
+     * as recycled, see thread_get_stack_and_fpregs() */
     spinlock_lock(&g_thread_stack_lock);
     for (size_t i = 0; i < g_thread_stack_num; i++) {
         if (g_thread_stack_map[i].stack == thread_stack) {
