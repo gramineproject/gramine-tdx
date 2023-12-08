@@ -97,8 +97,10 @@ void isr_c(struct isr_regs* regs) {
                 triple_fault();
             }
 
-            log_error("Panic: #PF on address 0x%lx (corresponding PTE %p)", faulted_addr, pte_addr);
-            log_error("       rip=0x%lx rsp=0x%lx rax=0x%lx", regs->rip, regs->rsp, regs->rax);
+            log_error("Panic: #PF on address 0x%lx (corresponding PTE %p with value 0x%lx)",
+                      faulted_addr, pte_addr, *pte_addr);
+            log_error("       error code=0x%lx rip=0x%lx rsp=0x%lx rax=0x%lx", regs->error_code,
+                      regs->rip, regs->rsp, regs->rax);
             triple_fault();
             break;
         case 20:
