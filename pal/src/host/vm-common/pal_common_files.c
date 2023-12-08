@@ -365,10 +365,12 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
         return -PAL_ERROR_DENIED;
     }
 
+    /* note that we need to first mmap with write permission (to update the mem region with file
+     * contents), and then we mprotect back to read-only (if was requested) */
     bool read  = !!(prot & PAL_PROT_READ);
     bool write = !!(prot & (PAL_PROT_WRITE | PAL_PROT_WRITECOPY));
     bool execute = !!(prot & PAL_PROT_EXEC);
-    ret = memory_alloc(addr, size, read, write, execute);
+    ret = memory_alloc(addr, size, read, /*write=*/true, execute);
     if (ret < 0)
         return ret;
 
@@ -404,6 +406,15 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
     if (size > bytes_filled) {
         /* file ended before all mmapped memory was filled -- remaining memory must be zeroed */
         memset((char*)addr + bytes_filled, 0, size - bytes_filled);
+    }
+
+    if (!write) {
+        /* restore read-only permission */
+        ret = memory_protect(addr, size, read, /*write=*/false, execute);
+        if (ret < 0) {
+            log_error("Cannot restore read-only permission during file mmap, fatal.");
+            BUG();
+        }
     }
 
     ret = 0;
