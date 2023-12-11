@@ -10,6 +10,7 @@
 #include "pal_error.h"
 #include "pal_internal.h"
 
+#include "kernel_debug.h"
 #include "kernel_virtio.h"
 
 int _PalSendHandle(struct pal_handle* target_process, struct pal_handle* cargo) {
@@ -30,5 +31,12 @@ int _PalInitDebugStream(const char* path) {
 }
 
 int _PalDebugLog(const void* buf, size_t size) {
+    if (!g_console) {
+        const char* buf_char = buf;
+        for (size_t i = 0; i < size; i++)
+            log_write_char(buf_char[i]);
+        return 0;
+    }
+
     return virtio_console_nprint(buf, size);
 }
