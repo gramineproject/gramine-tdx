@@ -7,9 +7,15 @@
  * - All shared-memory, MSR, MMIO and IO-ports accesses are double-checked (whether they access
  *   allowed memory regions/registers/port numbers). This may hamper performance but provides
  *   improved security.
+ *
+ * - MSR, MMIO and IO-ports functions may be used in very early boot stages when Address Sanitizer
+ *   is not yet initialized, and thus they must be marked with `__attribute_no_sanitize_address`.
+ *   However, shared-memory-access functions should be compiled with ASan for additional security.
  */
 
 #include <stdint.h>
+
+#include "api.h"
 
 #include "kernel_apic.h"
 #include "kernel_debug.h"
@@ -28,6 +34,7 @@ static inline void check_shared_memory_access(uintptr_t addr, size_t size) {
     }
 }
 
+__attribute_no_sanitize_address
 static inline void check_mmio_access(uintptr_t addr, size_t size) {
     if (!(PCI_MMIO_START_ADDR <= addr && addr + size <= PCI_MMIO_END_ADDR) &&
             !(IOAPIC_ADDR <= addr && addr + size <= IOAPIC_ADDR + IOAPIC_SIZE)) {
@@ -36,6 +43,7 @@ static inline void check_mmio_access(uintptr_t addr, size_t size) {
     }
 }
 
+__attribute_no_sanitize_address
 static inline void check_portio_read(uint16_t port) {
     if (port != PCI_CONFIG_SPACE_DATA_IO_PORT &&
             port != PCI_CONFIG_SPACE_DATA_IO_PORT + 1 &&
@@ -47,6 +55,7 @@ static inline void check_portio_read(uint16_t port) {
     }
 }
 
+__attribute_no_sanitize_address
 static inline void check_portio_write(uint16_t port) {
     if (port != PCI_CONFIG_SPACE_ADDR_IO_PORT &&
             port != PCI_CONFIG_SPACE_DATA_IO_PORT &&
@@ -91,6 +100,7 @@ void* vm_shared_memset(void* _s, int c, size_t n) {
     return memset(_s, c, n);
 }
 
+__attribute_no_sanitize_address
 void vm_shared_wrmsr(uint64_t msr, uint64_t value) {
     if (msr != MSR_INSECURE_IA32_LAPIC_SPURIOUS_INTERRUPT_VECTOR &&
             msr != MSR_INSECURE_IA32_LAPIC_LVT_TIMER &&
@@ -149,6 +159,7 @@ void vm_shared_writeq(uint64_t* shared_addr, uint64_t data) {
     COMPILER_BARRIER();
 }
 
+__attribute_no_sanitize_address
 uint8_t vm_mmio_readb(uint8_t* mmio_addr) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data;
@@ -157,6 +168,7 @@ uint8_t vm_mmio_readb(uint8_t* mmio_addr) {
     return (uint8_t)data;
 }
 
+__attribute_no_sanitize_address
 uint16_t vm_mmio_readw(uint16_t* mmio_addr) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data;
@@ -165,6 +177,7 @@ uint16_t vm_mmio_readw(uint16_t* mmio_addr) {
     return (uint16_t)data;
 }
 
+__attribute_no_sanitize_address
 uint32_t vm_mmio_readl(uint32_t* mmio_addr) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data;
@@ -173,6 +186,7 @@ uint32_t vm_mmio_readl(uint32_t* mmio_addr) {
     return (uint32_t)data;
 }
 
+__attribute_no_sanitize_address
 uint64_t vm_mmio_readq(uint64_t* mmio_addr) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data;
@@ -181,6 +195,7 @@ uint64_t vm_mmio_readq(uint64_t* mmio_addr) {
     return data;
 }
 
+__attribute_no_sanitize_address
 void vm_mmio_writeb(uint8_t* mmio_addr, uint8_t _data) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data = (uint64_t)_data;
@@ -188,6 +203,7 @@ void vm_mmio_writeb(uint8_t* mmio_addr, uint8_t _data) {
                           mmio_addr, &data);
 }
 
+__attribute_no_sanitize_address
 void vm_mmio_writew(uint16_t* mmio_addr, uint16_t _data) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data = (uint64_t)_data;
@@ -195,6 +211,7 @@ void vm_mmio_writew(uint16_t* mmio_addr, uint16_t _data) {
                           mmio_addr, &data);
 }
 
+__attribute_no_sanitize_address
 void vm_mmio_writel(uint32_t* mmio_addr, uint32_t _data) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     uint64_t data = (uint64_t)_data;
@@ -202,12 +219,14 @@ void vm_mmio_writel(uint32_t* mmio_addr, uint32_t _data) {
                           mmio_addr, &data);
 }
 
+__attribute_no_sanitize_address
 void vm_mmio_writeq(uint64_t* mmio_addr, uint64_t data) {
     check_mmio_access((uintptr_t)mmio_addr, sizeof(*mmio_addr));
     tdx_vmcall_ve_reqmmio(sizeof(*mmio_addr), TDG_VP_VMCALL_INSTR_IO_WRITE,
                           mmio_addr, &data);
 }
 
+__attribute_no_sanitize_address
 uint8_t vm_portio_readb(uint16_t port) {
     check_portio_read(port);
     uint64_t data;
@@ -215,6 +234,7 @@ uint8_t vm_portio_readb(uint16_t port) {
     return (uint8_t)data;
 }
 
+__attribute_no_sanitize_address
 uint16_t vm_portio_readw(uint16_t port) {
     check_portio_read(port);
     uint64_t data;
@@ -222,6 +242,7 @@ uint16_t vm_portio_readw(uint16_t port) {
     return (uint16_t)data;
 }
 
+__attribute_no_sanitize_address
 uint32_t vm_portio_readl(uint16_t port) {
     check_portio_read(port);
     uint64_t data;
@@ -229,18 +250,21 @@ uint32_t vm_portio_readl(uint16_t port) {
     return (uint32_t)data;
 }
 
+__attribute_no_sanitize_address
 void vm_portio_writeb(uint16_t port, uint8_t val) {
     check_portio_write(port);
     uint64_t data = (uint64_t)val;
     tdx_vmcall_instr_io(sizeof(val), TDG_VP_VMCALL_INSTR_IO_WRITE, port, &data);
 }
 
+__attribute_no_sanitize_address
 void vm_portio_writew(uint16_t port, uint16_t val) {
     check_portio_write(port);
     uint64_t data = (uint64_t)val;
     tdx_vmcall_instr_io(sizeof(val), TDG_VP_VMCALL_INSTR_IO_WRITE, port, &data);
 }
 
+__attribute_no_sanitize_address
 void vm_portio_writel(uint16_t port, uint32_t val) {
     check_portio_write(port);
     uint64_t data = (uint64_t)val;

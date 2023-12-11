@@ -8,8 +8,8 @@
   - BIOS:    at 4GB
   - PAL:     at 1M (and before 4MB)
   - LibOS:   close to end-of-RAM, but not in below regions
-  - PTs:     at [512MB, 648MB)
-  - Sh mem:  at [648MB, 896MB) -- shared memory for virtqueues
+  - PTs:     at [512MB, 658MB)
+  - Sh mem:  at [658MB, 896MB) -- shared memory for virtqueues
   - Hole:    from 2GB to 3GB (QEMU/KVM creates this hole)
   - PCI bus: from 3GB to 4GB
   - (the rest space is for app usage)
@@ -62,6 +62,8 @@
 
 - Networking: uses virtio-vsock driver
   - may need to load the Linux kernel module: `sudo modprobe vhost_vsock`
+
+- Address Sanitizer support (requires VM with at least 8GB RAM)
 
 # Not yet implemented
 

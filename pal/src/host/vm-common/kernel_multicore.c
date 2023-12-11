@@ -270,7 +270,8 @@ success:
 }
 
 /* called by `kernel_multicore.S` on AP startup; must not allocate heap memory! */
-__attribute_no_stack_protector
+__attribute_no_stack_protector  /* starts with zero GS base register */
+__attribute_no_sanitize_address /* starts with dummy page tables w/o ASan shared memory */
 noreturn void pal_start_ap_c(uint32_t cpu_idx) {
     set_dummy_gs_base();
 

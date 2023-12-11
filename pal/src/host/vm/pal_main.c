@@ -10,6 +10,7 @@
 
 #include "api.h"
 #include "cpu.h"
+#include "init.h"
 #include "list.h"
 #include "pal.h"
 #include "pal_common.h"
@@ -153,7 +154,8 @@ noreturn static void print_usage_and_exit(void) {
 noreturn int pal_start_continue(void* cmdline_);
 
 /* called by `vm_bootloader.S` on kernel startup */
-__attribute_no_stack_protector
+__attribute_no_stack_protector  /* starts with zero GS base register */
+__attribute_no_sanitize_address /* starts with dummy page tables w/o ASan shared memory */
 noreturn void pal_start_c(void) {
     int ret;
 
@@ -198,6 +200,8 @@ noreturn void pal_start_c(void) {
      * This is not true for common hypervisors like QEMU/KVM, so must do it ourselves. Also,
      * memory_pagetables_init() marked all pages as RWX, now is good time to revert to NONE. */
     zero_out_memory_and_prot_none();
+
+    call_init_array();
 
     init_slab_mgr();
 
