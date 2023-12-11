@@ -56,8 +56,7 @@ libpal_tdx = executable('pal',
         '-Wno-address-of-packed-member',
 
         cflags_custom_stack_protector,
-
-        # cflags_sanitizers,
+        cflags_sanitizers,
     ],
 
     link_args: [

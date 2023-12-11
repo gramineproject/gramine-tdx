@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "api.h"
+#include "asan.h"
 #include "spinlock.h"
 
 #include "kernel_sched.h"
@@ -48,6 +49,12 @@ int thread_get_stack_and_fpregs(void** out_stack, void** out_fpregs) {
     int ret;
     void* stack_base = NULL;
 
+    /* we allocate both the stack and the fpregs (XSAVE) memory region in one go; note that
+     * fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
+    assert(g_xsave_size);
+    size_t stack_and_fpregs_size = THREAD_STACK_SIZE + ALT_STACK_SIZE + g_xsave_size
+                                                     + VM_XSAVE_ALIGN;
+
     spinlock_lock(&g_thread_stack_lock);
     for (size_t i = 0; i < g_thread_stack_num; i++) {
         if (!g_thread_stack_map[i].used) {
@@ -73,10 +80,7 @@ int thread_get_stack_and_fpregs(void** out_stack, void** out_fpregs) {
         g_thread_stack_map = tmp;
     }
 
-    /* allocate both the stack and the fpregs (XSAVE) memory region in one go; note that
-     * fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
-    assert(g_xsave_size);
-    stack_base = malloc(THREAD_STACK_SIZE + ALT_STACK_SIZE + g_xsave_size + VM_XSAVE_ALIGN);
+    stack_base = malloc(stack_and_fpregs_size);
     if (!stack_base) {
         ret = -PAL_ERROR_NOMEM;
         goto out;
@@ -91,6 +95,9 @@ int thread_get_stack_and_fpregs(void** out_stack, void** out_fpregs) {
 out:
     if (ret == 0) {
         assert(stack_base);
+#ifdef ASAN
+        asan_unpoison_region((uintptr_t)stack_base, stack_and_fpregs_size);
+#endif
         *out_stack  = stack_base;
         *out_fpregs = stack_base + THREAD_STACK_SIZE + ALT_STACK_SIZE;
     }
@@ -108,6 +115,10 @@ noreturn void thread_free_stack_and_die(void* thread_stack, int* clear_child_tid
             break;
         }
     }
+
+    /* we do not ASan-unpoison the current stack at this point because we call into `sched_thread()`
+     * which in turn calls into other functions, i.e. the stack will be used extensively there;
+     * instead we ASan-unpoison this stack when it is re-used, see thread_get_stack_and_fpregs() */
 
     /* we might still be using the stack we just marked as unused until we enter the asm mode,
      * so we do not unlock now but rather when another thread is scheduled */
