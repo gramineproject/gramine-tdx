@@ -43,9 +43,9 @@ _start32:
     push    %eax
     lret                                // far return to _start64 in 64-bit mode
 
-    .sect   .resetvec, "ax"
+    .section .resetvec, "ax"
     .align  0x80
-    .fill   _end - . - 0x10, 1, 0xcc
+    .fill   0x70, 1, 0xcc
 pal_start:
     cli
     cld
@@ -115,7 +115,7 @@ _gdtr:
 _sys_initial_stack:
 
 
-    .sect   .note, "a"
+    .section .note, "a"
     .align  4
     .long   2f - 1f
     .long   4f - 3f

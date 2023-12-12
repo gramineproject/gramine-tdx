@@ -5,7 +5,7 @@
     .globl _reset
     .hidden _reset
 
-    .sect   .rodata
+    .section .rodata
 _MSG_NO_KERNEL:
     .ascii  "Kernel not found! Please specify \"-kernel <ELF file>\" on QEMU command line!\r\n"
 _MSG_NO_KERNEL_SIZE = . - _MSG_NO_KERNEL
@@ -43,7 +43,7 @@ _start32:
     hlt
     jmp     .
 
-    .sect   .resetvec, "ax"
+    .section .resetvec, "ax"
     .align  0x80, 0xcc
     .code16
 
@@ -73,7 +73,7 @@ _ds_sel = . - 1b
     mov     $(_MSG_NO_KERNEL - _end), %esi
     ljmpl   $_cs_sel, $(_start32 - _end)
 
-    .fill   _end - . - 0x10, 1, 0xcc
+    .align  0x10, 0xcc
 _reset:
     cli
     cld
