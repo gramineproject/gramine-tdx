@@ -147,20 +147,16 @@ int thread_helper_create(int (*callback)(void*), struct thread** out_thread) {
     if (!thread)
         return -PAL_ERROR_NOMEM;
 
-    /* fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
+    /* allocate both the stack and the fpregs (XSAVE) memory region in one go; note that
+     * fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
     assert(g_xsave_size);
-    void* fpregs = malloc(g_xsave_size + VM_XSAVE_ALIGN);
-    if (!fpregs) {
+    void* stack_base = malloc(THREAD_STACK_SIZE + ALT_STACK_SIZE + g_xsave_size + VM_XSAVE_ALIGN);
+    if (!stack_base) {
         free(thread);
         return -PAL_ERROR_NOMEM;
     }
-
-    void* stack = malloc(THREAD_STACK_SIZE);
-    if (!stack) {
-        free(fpregs);
-        free(thread);
-        return -PAL_ERROR_NOMEM;
-    }
+    void* stack  = stack_base;
+    void* fpregs = stack_base + THREAD_STACK_SIZE + ALT_STACK_SIZE;
 
     thread_setup(thread, fpregs, stack, callback, /*param=*/NULL);
     thread->is_helper = true;
