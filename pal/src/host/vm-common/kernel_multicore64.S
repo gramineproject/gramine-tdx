@@ -20,7 +20,7 @@
 // This code largely resembles the one in tdx/pal_bootloader.S (for BSP).
 // See also kernel_multicore.{h,c}.
 
-    .sect   .ap_startup_page, "ax"
+    .section .ap_startup_page, "ax"
     .align  0x1000
     .code64
 ap_startup_page_start:
