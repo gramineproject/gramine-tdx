@@ -80,7 +80,8 @@ static spinlock_t g_invalidate_tlb_request_lock = INIT_SPINLOCK_UNLOCKED;
 void isr_c(struct isr_regs* regs) {
     int ret;
 
-    extern char gdt_start[], gdt_entry_kernel_cs[];
+    extern char gdt_start[1];
+    extern char gdt_entry_kernel_cs[1];
     uint64_t kernel_cs = (uint64_t)(gdt_entry_kernel_cs - gdt_start);
 
     switch (regs->int_number) {
@@ -247,8 +248,8 @@ static int idt_gate_set(uint8_t isr_number, void* isr_addr) {
 }
 
 static int tss_init(void) {
-    extern struct tss_64bitmode tss_64bitmode[];
-    extern struct tss_64bitmode_segment_descriptor tss_64bitmode_desc[];
+    extern struct tss_64bitmode tss_64bitmode[1];
+    extern struct tss_64bitmode_segment_descriptor tss_64bitmode_desc[1];
 
     /* *.S must have initialized TSS already (except for interrupt stack), check it */
     struct tss_64bitmode* tss = tss_64bitmode;
@@ -276,7 +277,7 @@ static int tss_init(void) {
 }
 
 static int idt_init(void) {
-    extern void* idt_start; /* IDT from *.S */
+    extern char idt_start[1]; /* IDT from *.S */
     g_idt = (struct idt_gate*)&idt_start;
 
     int ret;
@@ -391,8 +392,8 @@ static int idt_init(void) {
 }
 
 int interrupts_init(void) {
-    extern char gdt_start[];
-    extern struct tss_64bitmode_segment_descriptor tss_64bitmode_desc[];
+    extern char gdt_start[1];
+    extern struct tss_64bitmode_segment_descriptor tss_64bitmode_desc[1];
 
     int ret;
 
@@ -405,8 +406,8 @@ int interrupts_init(void) {
         return ret;
 
     /* load our GDT and IDT */
-    extern char gdtr[];
-    extern char idtr[];
+    extern char gdtr[1];
+    extern char idtr[1];
     __asm__ volatile("lgdt %0" :: "m"(gdtr));
     __asm__ volatile("lidt %0" :: "m"(idtr));
 

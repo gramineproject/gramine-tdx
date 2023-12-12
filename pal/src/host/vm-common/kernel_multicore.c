@@ -110,18 +110,19 @@ static int init_multicore_mp_wakeup_mailbox(uint32_t num_cpus, void* hob_list_ad
 
     struct mp_wakeup_mailbox* mailbox = (struct mp_wakeup_mailbox*)mailbox_addr;
     mailbox->wakeup_vector = AP_STARTUP_PAGE_ADDRESS;
-
-    uint16_t initial_command = __atomic_load_n(&mailbox->command, __ATOMIC_SEQ_CST);
+    uint16_t* mailbox_command = &mailbox->command;
+    mailbox_command = __builtin_assume_aligned(mailbox_command, 2);
+    uint16_t initial_command = __atomic_load_n(mailbox_command, __ATOMIC_SEQ_CST);
     if (initial_command != MP_WAKEUP_MAILBOX_COMMAND_NOOP)
         return - PAL_ERROR_DENIED;
 
     /* note that we start with CPU1; we assume that CPU0 is our BSP */
     for (size_t i = 1; i < apic_ids_size; i++) {
         mailbox->apic_id = apic_ids[i];
-        __atomic_store_n(&mailbox->command, MP_WAKEUP_MAILBOX_COMMAND_WAKEUP, __ATOMIC_SEQ_CST);
+        __atomic_store_n(mailbox_command, MP_WAKEUP_MAILBOX_COMMAND_WAKEUP, __ATOMIC_SEQ_CST);
 
         size_t tries = 0;
-        while (__atomic_load_n(&mailbox->command, __ATOMIC_SEQ_CST) !=
+        while (__atomic_load_n(mailbox_command, __ATOMIC_SEQ_CST) !=
                 MP_WAKEUP_MAILBOX_COMMAND_NOOP) {
             /* BSP waits until the AP acknowledges the receipt of the wakeup command */
             if (tries++ > 5) {
