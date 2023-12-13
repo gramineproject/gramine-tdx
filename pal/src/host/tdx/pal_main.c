@@ -150,7 +150,10 @@ static void prot_none_memory(void) {
         if (addr < (uintptr_t)g_pal_public_state.memory_address_start)
             return;
 
-        (void)memory_mark_pages_off(addr, PAGE_SIZE);
+        int ret = memory_protect((void*)addr, PAGE_SIZE, /*read=*/false, /*write=*/false,
+                                 /*execute=*/false);
+        if (ret < 0)
+            BUG();
     }
 }
 
