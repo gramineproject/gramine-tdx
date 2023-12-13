@@ -277,7 +277,7 @@ static int tss_init(void) {
 }
 
 static int idt_init(void) {
-    extern char idt_start[1]; /* IDT from *.S */
+    extern struct idt_gate idt_start[256]; /* IDT from *.S */
     g_idt = (struct idt_gate*)&idt_start;
 
     int ret;
