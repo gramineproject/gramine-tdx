@@ -137,7 +137,10 @@ static void zero_out_memory_and_prot_none(void) {
             return;
 
         memset((void*)addr, 0, PAGE_SIZE);
-        (void)memory_mark_pages_off(addr, PAGE_SIZE);
+        int ret = memory_protect((void*)addr, PAGE_SIZE, /*read=*/false, /*write=*/false,
+                                 /*execute=*/false);
+        if (ret < 0)
+            BUG();
     }
 }
 
