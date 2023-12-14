@@ -40,7 +40,7 @@ int virtio_console_isr(void) {
 
     uint32_t interrupt_status = vm_mmio_readl(g_console->interrupt_status_reg);
     if (!WITHIN_MASK(interrupt_status, VIRTIO_INTERRUPT_STATUS_MASK)) {
-        log_write("[console] Panic: ISR status register has reserved bits set\n");
+        debug_serial_io_write("[console] Panic: ISR status register has reserved bits set");
         triple_fault();
     }
 
@@ -336,7 +336,7 @@ out:
 int virtio_console_print(const char* s) {
     int ret = virtio_console_nprint(s, strlen(s) + 1);
     if (ret < 0)
-        log_write("[console] Warning: could not print to console\n");
+        debug_serial_io_write("[console] Warning: could not print to console");
     return ret;
 }
 
