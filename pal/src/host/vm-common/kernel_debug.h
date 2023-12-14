@@ -7,17 +7,8 @@
 
 #define SERIAL_IO_PORT 0x3F8
 
-#include <stddef.h>
 #include <stdint.h>
 
-void log_write_char(char c);
-void log_write(const char* str);
-void int_to_str(uint64_t x, char* str, size_t str_size);
-
-#define LOG_WRITE_INT(msg, var)                                                   \
-    ({                                                                            \
-        int_to_str((uint64_t)var, str, sizeof(str));                              \
-        log_write(msg);                                                           \
-        log_write(str);                                                           \
-        log_write("\n");                                                          \
-    })
+void debug_serial_io_write_char(char c);
+void debug_serial_io_write(const char* str);
+void debug_serial_io_write_int(const char* str, uint64_t x);
