@@ -144,12 +144,14 @@ static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t
     /* for MMU traversal in user mode, mid-tree entries must be accessible also in ring-3 */
     uint64_t tree_flags = 0x7;
 
-    size_t pages_4k_cnt = memory_size / (4 * 1024);
-    size_t pages_2m_cnt = memory_size / (2 * 1024 * 1024);
-    size_t pages_1g_cnt = memory_size / (1 * 1024 * 1024 * 1024);
+    size_t pages_4k_cnt = UDIV_ROUND_UP(memory_size, 4 * 1024);
+    size_t pages_2m_cnt = UDIV_ROUND_UP(memory_size, 2 * 1024 * 1024);
+    size_t pages_1g_cnt = UDIV_ROUND_UP(memory_size, 1 * 1024 * 1024 * 1024);
 
-    size_t page_tables_cnt     = pages_4k_cnt / 512;
-    size_t page_dir_tables_cnt = pages_2m_cnt / 512;
+    size_t page_tables_cnt     = UDIV_ROUND_UP(pages_4k_cnt, 512);
+    size_t page_dir_tables_cnt = UDIV_ROUND_UP(pages_2m_cnt, 512);
+
+    assert(pages_4k_cnt && pages_2m_cnt && pages_1g_cnt && page_tables_cnt && page_dir_tables_cnt);
 
     size_t total_tables_cnt = page_tables_cnt + page_dir_tables_cnt + /*PDP=*/1 + /*PML4=*/1;
     if (total_tables_cnt * PAGE_SIZE > page_tables_size) {
