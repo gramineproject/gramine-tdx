@@ -34,7 +34,7 @@ int _PalDebugLog(const void* buf, size_t size) {
     if (!g_console) {
         const char* buf_char = buf;
         for (size_t i = 0; i < size; i++)
-            log_write_char(buf_char[i]);
+            debug_serial_io_write_char(buf_char[i]);
         return 0;
     }
 
