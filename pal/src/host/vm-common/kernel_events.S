@@ -15,6 +15,7 @@
     globl   save_context_and_restore_next
     globl   do_xsave
     globl   do_xrstor
+    globl   thread_main_wrapper
 
 .macro  isrstub num, has_errorcode
     globl   isr_\num
@@ -309,3 +310,23 @@ __do_xrstor:
 do_xrstor:
     popq %r11
     jmp __do_xrstor
+
+
+    // void thread_main_wrapper(void* callback_args, void* callback, void* terminate_func)
+    //
+    //   RDI (1st arg):  callback args  -- arguments of the main function of the starting thread
+    //   RSI (2nd arg):  callback       -- main function of the starting thread
+    //   RDX (3rd arg):  terminate_func -- function to terminate the thread
+    //
+    // This function is required to support callback functions that perform `return 0` instead of
+    // `PalThreadExit()` at the end of thread execution. Without this wrapper, the thread would jump
+    // off the stack upon `return 0`.
+    //
+thread_main_wrapper:
+    push  %rdx
+    callq *%rsi
+
+    pop   %rdx
+    xor   %rdi, %rdi
+    callq *%rdx
+    ud2

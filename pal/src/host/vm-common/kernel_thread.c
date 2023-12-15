@@ -25,6 +25,10 @@
 #include "kernel_virtio.h"
 #include "kernel_xsave.h"
 
+/* below functions are located in kernel_events.S and pal_common_threading.c */
+noreturn void pal_common_thread_exit(int* clear_child_tid);
+noreturn void thread_main_wrapper(void* callback_args, void* callback, void* terminate_func);
+
 /* We cannot just use malloc/free to allocate/free thread stacks because thread-exit routine needs
  * to execute on the stack and thus can't execute free (it would execute with no stack after such
  * call). Thus, we resort to recycling thread stacks (and fpregs memory regions allocated together
@@ -122,8 +126,10 @@ void thread_setup(struct thread* thread, void* fpregs, void* stack, int (*callba
 
     /* the context (GPRs, XSAVE pointer, etc.) is initialized with zeros; set only required regs */
     thread->context.rflags = 0x202;                            /* default RFLAGS */
-    thread->context.rip = (uint64_t)callback;                  /* func to start */
+    thread->context.rip = (uint64_t)thread_main_wrapper;       /* wrapper func to start */
     thread->context.rdi = (uint64_t)param;                     /* argument to func */
+    thread->context.rsi = (uint64_t)callback;                  /* actual func to start */
+    thread->context.rdx = (uint64_t)pal_common_thread_exit;    /* wrapper func to terminate */
     thread->context.rsp = (uint64_t)stack + THREAD_STACK_SIZE; /* stack top */
     thread->context.fpregs = ALIGN_UP_PTR(fpregs, VM_XSAVE_ALIGN);
 
