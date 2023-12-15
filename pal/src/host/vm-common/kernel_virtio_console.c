@@ -312,8 +312,16 @@ int virtio_console_nprint(const char* s, size_t size) {
 
     uint16_t desc_idx;
     ret = virtq_alloc_desc(g_console->tq, shared_tq_buf_addr, size, /*flags=*/0, &desc_idx);
-    if (ret < 0)
-        goto out;
+    if (ret < 0) {
+        /* TQ is full, wait until all messages are consumed (and printed) by VMM and try again */
+        ret = cleanup_tq_completely();
+        if (ret < 0)
+            goto out;
+
+        ret = virtq_alloc_desc(g_console->tq, shared_tq_buf_addr, size, /*flags=*/0, &desc_idx);
+        if (ret < 0)
+            goto out;
+    }
 
     /* place the descriptor with message in the queue for host-printing */
     uint16_t avail_idx = g_console->tq->cached_avail_idx;
