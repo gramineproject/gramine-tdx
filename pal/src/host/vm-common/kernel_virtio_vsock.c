@@ -1682,7 +1682,13 @@ static int virtio_vsock_close_common(struct virtio_vsock_connection* conn, uint6
         goto out;
     }
 
-    if (conn->state != VIRTIO_VSOCK_ESTABLISHED && conn->state != VIRTIO_VSOCK_LISTEN) {
+    if (conn->state == VIRTIO_VSOCK_LISTEN) {
+        /* listening socket doesn't have a shutdown/disconnect operation */
+        ret = 0;
+        goto out;
+    }
+
+    if (conn->state != VIRTIO_VSOCK_ESTABLISHED) {
         ret = -PAL_ERROR_NOTCONNECTION;
         goto out;
     }
