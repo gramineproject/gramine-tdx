@@ -139,12 +139,13 @@ struct virtio_vsock_connection {
     bool recv_disallowed;
     bool send_disallowed;
 
-    /* below three fields needed to correctly support dualstack (only IPv4, only IPv6 or both);
-     * note that all packets will actually be received/sent on only one of the dualstack sockets
-     * (the first of the sockets to be bound to the same port) */
+    /* below four fields needed to correctly support dualstack (only IPv4, only IPv6 or both) and
+     * SO_REUSEPORT (multiple sockets bound to same port); note that packets will be received/sent
+     * on only one of the sockets (the first of the sockets to be bound to the same port) */
     bool ipv4_bound;
     bool ipv6_bound;
     bool ipv6_v6only;
+    bool reuseport;
 };
 
 struct sockaddr_vm {

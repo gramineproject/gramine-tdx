@@ -1212,7 +1212,7 @@ out:
 }
 
 int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* out_new_port,
-                      bool is_ipv4, bool ipv6_v6only) {
+                      bool is_ipv4, bool ipv6_v6only, bool reuseport) {
     int ret;
 
     if (!addr || addrlen < sizeof(struct sockaddr_vm))
@@ -1251,17 +1251,18 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
             if (!check_conn || check_conn->guest_port != bind_to_port)
                 continue;
 
-            /* allow dualstack (ipv4 & ipv6) connections, if not explicitly requested otherwise;
-             * it's enough if only one socket is marked as dualstack (`ipv6_v6only = false`) */
-            if (!ipv6_v6only || !check_conn->ipv6_v6only) {
-                if (is_ipv4 && !check_conn->ipv4_bound) {
-                    assert(check_conn->ipv6_bound);
-                    continue;
-                }
-                else if (!is_ipv4 && !check_conn->ipv6_bound) {
-                    assert(check_conn->ipv4_bound);
-                    continue;
-                }
+            if (is_ipv4 && check_conn->ipv6_bound && check_conn->ipv6_v6only) {
+                /* IPv4 socket wants to bind to IPv6-bound port; allow only if not dualstack */
+                continue;
+            }
+            if (!is_ipv4 && check_conn->ipv4_bound && ipv6_v6only) {
+                /* IPv6 socket wants to bind to IPv4-bound port; allow only if not dualstack */
+                continue;
+            }
+
+            if (reuseport && check_conn->reuseport) {
+                /* SO_REUSEPORT is allowed by both the bound and to-be-bound sockets */
+                continue;
             }
 
             ret = -PAL_ERROR_STREAMEXIST;
@@ -1283,6 +1284,7 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
         assert(conn->ipv6_bound == false);
         conn->ipv6_bound = true;
     }
+    conn->reuseport = reuseport;
 
     ret = 0;
 out:
@@ -1498,6 +1500,25 @@ int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen) {
 out:
     spinlock_unlock(&g_vsock_connections_lock);
     return ret;
+}
+
+int virtio_vsock_set_socket_options(int sockfd, bool ipv6_v6only, bool reuseport) {
+    if (sockfd < 0)
+        return -PAL_ERROR_BADHANDLE;
+
+    spinlock_lock(&g_vsock_connections_lock);
+
+    struct virtio_vsock_connection* conn = get_connection(sockfd);
+    if (!conn) {
+        spinlock_unlock(&g_vsock_connections_lock);
+        return -PAL_ERROR_BADHANDLE;
+    }
+
+    conn->ipv6_v6only = ipv6_v6only;
+    conn->reuseport = reuseport;
+
+    spinlock_unlock(&g_vsock_connections_lock);
+    return 0;
 }
 
 long virtio_vsock_peek(int sockfd) {
