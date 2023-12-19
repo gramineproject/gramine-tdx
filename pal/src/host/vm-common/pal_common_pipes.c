@@ -90,7 +90,7 @@ static int pipe_connect(struct pal_handle** handle, const char* name,
     }
 
     if (!found_server_pipe) {
-        ret = -PAL_ERROR_DENIED; /* will be translated to -ECONNREFUSED in LibOS */
+        ret = -PAL_ERROR_CONNFAILED;
         goto out;
     }
 
