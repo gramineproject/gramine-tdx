@@ -127,6 +127,9 @@ int notify_about_timeouts_uninterruptable(void) {
             LISTP_DEL(timeout, &g_pending_timeouts_list, list);
         }
     }
+    /* to prevent lost wakeups on generic g_streams_waiting_events_futex (e.g., when a thread was
+     * already running when the wakeup on this futex triggered), need to periodically kick it */
+    sched_thread_wakeup_uninterruptable(&g_streams_waiting_events_futex);
     spinlock_unlock(&g_pending_timeouts_list_lock);
     return 0;
 }
