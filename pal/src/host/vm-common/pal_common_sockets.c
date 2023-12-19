@@ -199,7 +199,8 @@ static int pal_common_socket_bind(struct pal_handle* handle, struct pal_socket_a
 
     uint16_t new_port = 0;
     int ret = virtio_vsock_bind(handle->sock.fd, &addr_vm, sizeof(addr_vm), &new_port,
-                                handle->sock.domain == PAL_IPV4, handle->sock.ipv6_v6only);
+                                handle->sock.domain == PAL_IPV4, handle->sock.ipv6_v6only,
+                                handle->sock.reuseport);
     if (ret < 0)
         return ret;
 
@@ -353,9 +354,13 @@ static int pal_common_socket_attrsetbyhdl(struct pal_handle* handle, PAL_STREAM_
     spinlock_lock(&handle->sock.lock);
     handle->sock.is_nonblocking = attr->nonblocking;
     handle->sock.ipv6_v6only    = attr->socket.ipv6_v6only;
+    handle->sock.reuseport      = attr->socket.reuseport;
+
+    int ret = virtio_vsock_set_socket_options(handle->sock.fd, handle->sock.ipv6_v6only,
+                                              handle->sock.reuseport);
 
     spinlock_unlock(&handle->sock.lock);
-    return 0;
+    return ret;
 }
 
 static int pal_common_tcp_send(struct pal_handle* handle, struct iovec* iov, size_t iov_len,
