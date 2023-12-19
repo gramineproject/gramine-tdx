@@ -28,6 +28,8 @@ static_assert(MAX_NUM_CPUS % BITS_IN_TYPE(unsigned long) == 0, "");
 
 extern bool g_kick_sched_thread;
 
+extern int g_streams_waiting_events_futex;
+
 /* the four helper functions are implemented in pal_common_threading.c which knows about the
  * relationship between the TCB (which is pointed to by GS base reg) and the thread struct */
 struct thread* get_thread_ptr(uintptr_t curr_gs_base);
