@@ -1,6 +1,6 @@
-*****************************************
-Gramine Library OS with Intel SGX Support
-*****************************************
+*********************************************
+Gramine Library OS with Intel SGX/TDX Support
+*********************************************
 
 .. image:: https://readthedocs.org/projects/gramine/badge/?version=latest
    :target: http://gramine.readthedocs.io/en/latest/?badge=latest
@@ -17,6 +17,12 @@ Gramine Library OS with Intel SGX Support
 .. |nbsp| unicode:: 0xa0
    :trim:
 
+Gramine-TDX is experimental
+===========================
+
+**PLEASE NOTE THAT GRAMINE-TDX IS CONSIDERED AN EXPERIMENTAL PROJECT!**
+
+**THIS SOFTWARE COMES WITH NO WARRANTIES, USE AT YOUR OWN RISK!**
 
 What is Gramine?
 ================
