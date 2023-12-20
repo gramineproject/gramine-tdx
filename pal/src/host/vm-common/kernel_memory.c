@@ -6,11 +6,9 @@
  *
  * Notes on multi-core synchronization:
  *   - memory_get_shared_region()/memory_free_shared_region() are used on init, no sync required
- *   - g_pml4_table_base is set on init, no sync required
- *   - ops on page tables are currently used on init, no sync required
- *   - memory_alloc() relies on the fact that no other thread will access/free newly allocated
- *     memory, so no sync required
- *   - memory_free() does nothing, no sync required
+ *   - g_pml4_table_base, page tables, Address Sanitizer are set on init, no sync required
+ *   - memory_alloc(), memory_protect() and memory_free() rely on LibOS synchronization and thus do
+ *     not require additional PAL-level sync
  *   - all other funcs are used only at init, no sync required
  */
 
