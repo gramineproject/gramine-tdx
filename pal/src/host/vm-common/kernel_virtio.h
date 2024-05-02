@@ -313,11 +313,6 @@ struct virtio_vsock_config {
  *   - tq_notify_addr is set at init and used in copy_into_tq(), sync via transmit-side lock
  *   - host_cid is set at init, no sync required
  *   - guest_cid is set at init, no sync required
- *   - peer_fwd_cnt and peer_buffer_alloc are used by CPU0-tied bottomhalves thread during RX,
- *     sync via receive-side lock
- *   - fwd_cnt and msg_cnt are used during RX and TX, must be accessed via atomic ops
- *   - buf_alloc is set at init, no sync required
- *   - tx_cnt is used in copy_into_tq(), sync via transmit-side lock
  *   - conns_size, conns, conns_by_host_port used in many places, sync via connections lock
  *   - pending_tq_control_packets and co. used during TX, sync via transmit-side lock
  *   - shared_rq_buf is set at init and used during RX, sync via receive-side lock
@@ -336,14 +331,6 @@ struct virtio_vsock {
 
     uint64_t host_cid;
     uint64_t guest_cid;
-
-    uint32_t peer_fwd_cnt;   /* total bytes received by host on tq */
-    uint32_t peer_buf_alloc; /* total buffer space on host */
-    uint32_t fwd_cnt;        /* total bytes received by guest on rq */
-    uint32_t buf_alloc;      /* total buffer space on guest */
-
-    uint32_t tx_cnt;         /* total bytes sent by guest on tq */
-    uint32_t msg_cnt;        /* total number of received msgs */
 
     uint32_t conns_size;                    /* size of dynamic array */
     struct virtio_vsock_connection** conns; /* dynamic array: fd -> connection */
