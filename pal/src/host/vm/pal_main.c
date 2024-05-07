@@ -170,12 +170,15 @@ noreturn void pal_start_c(void) {
         INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
                   MAX_NUM_CPUS);
 
-    e820_table_entry e820 = { .address = 0x0,
-                              .size    = rdfwcfg(FW_CFG_RAM_SIZE, sizeof(uint64_t)),
-                              .type    = E820_ADDRESS_RANGE_MEMORY };
+    e820_table_entry e820[E820_NR_ENTRIES]; /* 16*20 = 320B, ok to allocate on stack */
+    size_t e820_size;
 
-    ret = memory_init(&e820, sizeof(e820), &g_pal_public_state.memory_address_start,
-                                           &g_pal_public_state.memory_address_end);
+    ret = e820_table_init((char*)e820, &e820_size, sizeof(e820));
+    if (ret < 0)
+        INIT_FAIL("Can't read E820 table from VMM");
+
+    ret = memory_init(e820, e820_size, &g_pal_public_state.memory_address_start,
+                                       &g_pal_public_state.memory_address_end);
     if (ret < 0)
         INIT_FAIL("Failed to initialize physical memory");
 
@@ -185,7 +188,7 @@ noreturn void pal_start_c(void) {
     if (ret < 0)
         INIT_FAIL("Failed to initialize page tables");
 
-    ret = memory_preload_ranges(&e820, sizeof(e820), &add_preloaded_range);
+    ret = memory_preload_ranges(e820, e820_size, &add_preloaded_range);
     if (ret < 0)
         INIT_FAIL("Failed to initialize preloaded ranges");
 
@@ -276,6 +279,13 @@ noreturn void pal_start_c(void) {
     ret = virtio_fs_fuse_init();
     if (ret < 0)
         INIT_FAIL("Failed FUSE_INIT request of virtio-fs driver");
+
+
+#if 1     // TODO: DEBUG
+    for (int i = 0; i < E820_NR_ENTRIES; i++) {
+        log_always("e820: addr=%lu size=%lu type=%u", e820[i].address, e820[i].size, e820[i].type);
+    }
+#endif
 
     ret = _PalThreadCreate(&g_first_thread_handle, pal_start_continue, g_cmdline);
     if (ret < 0)

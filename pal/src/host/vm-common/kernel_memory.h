@@ -14,6 +14,9 @@
 #define SHARED_MEM_ADDR  0x29200000UL          /* shared memory occupies [658MB, 896MB) */
 #define SHARED_MEM_SIZE  (238UL * 1024 * 1024) /* 238MB */
 
+#define PCI_HOLE_ADDR    0x80000000UL          /* QEMU's memory hole + PCI (BARs, LAPIC, IOAPIC) */
+#define PCI_HOLE_SIZE    0x80000000UL          /* 2GB */
+
 /* equivalent to E820_TABLE_ENTRY in EFI_HOB_E820_TABLE (needs to be packed) */
 #define E820_ADDRESS_RANGE_MEMORY   1
 #define E820_ADDRESS_RANGE_RESERVED 2
@@ -22,6 +25,11 @@ typedef struct {
     uint64_t  size;
     uint32_t  type;
 } __attribute__((packed)) e820_table_entry;
+
+/* max number of entries in the E820 table; taken from QEMU sources */
+#define E820_NR_ENTRIES 16
+
+#define E820_TABLE_MAX_SIZE (E820_NR_ENTRIES * sizeof(e820_table_entry))
 
 extern uint64_t g_pml4_table_base;
 

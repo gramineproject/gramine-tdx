@@ -437,6 +437,12 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
         if (e820_entries[i].type == E820_ADDRESS_RANGE_MEMORY)
             continue;
 
+        if (PCI_HOLE_ADDR <= e820_entries[i].address &&
+                e820_entries[i].address + e820_entries[i].size <= PCI_HOLE_ADDR + PCI_HOLE_SIZE) {
+            /* reported reserved memory region is fully consumed by the PCI hole region */
+            continue;
+        }
+
         if (e820_entries[i].address < PAGE_TABLES_ADDR + PAGE_TABLES_SIZE &&
                 PAGE_TABLES_ADDR < e820_entries[i].address + e820_entries[i].size) {
             /* a reserved range overlaps with our page tables range */
@@ -483,7 +489,7 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
     ret = callback(SHARED_MEM_ADDR, SHARED_MEM_SIZE, "shared_memory");
     if (ret < 0)
         return -PAL_ERROR_NOMEM;
-    ret = callback(0x80000000UL, 0x80000000UL, "qemu_pci_hole");
+    ret = callback(PCI_HOLE_ADDR, PCI_HOLE_SIZE, "qemu_pci_hole");
     if (ret < 0)
         return -PAL_ERROR_NOMEM;
 

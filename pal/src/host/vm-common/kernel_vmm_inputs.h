@@ -2,17 +2,24 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 /*
- * Read inputs from VMM. Currently three inputs:
+ * Read inputs from VMM. Currently the following inputs:
  * - Command-line arguments
  * - Host environment variables
  * - PWD (host's current working directory)
+ * - initial UNIX time
+ * - E820 table of VMM-reserved memory ranges (only for VM PAL; TDX PAL uses TDX hobs)
  *
- * Gramine command-line args and host environment variables are read from fw_cfg QEMU pseudo-device.
- * They are supposed to be put in one of the selectors above 0x19 and be in a special format (see
- * below).
+ * Gramine command-line args, host environment variables, PWD, and initial UNIX time are all read
+ * from fw_cfg QEMU pseudo-device. They are supposed to be put in one of the selectors above 0x19
+ * and be in a special format (see below).
+ *
+ * The E820 table is also read from fw_cfg QEMU pseudo-device and uses the hard-coded selector
+ * "etc/e820" (file). Note that another selector FW_CFG_E820_TABLE was deprecated since QEMU v7.2.
  *
  * The selector with command-line args has the name "opt/gramine/args".
  * The selector with environment variables has the name "opt/gramine/envs".
+ * The selector with PWD has the name "opt/gramine/pwd".
+ * The selector with initial UNIX time has the name "opt/gramine/unixtime_s".
  *
  * For details, see:
  *   - qemu.org/docs/master/specs/fw_cfg.html
@@ -76,3 +83,5 @@ int cmdline_read_gramine_envs(const char* envs, int* out_envp_cnt, const char** 
 int cmdline_init_envs(char* cmdline_envs, size_t cmdline_envs_size);
 
 int unixtime_init(char* unixtime_s, size_t unixtime_size);
+
+int e820_table_init(char* e820_table, size_t* e820_size, size_t max_e820_size);
