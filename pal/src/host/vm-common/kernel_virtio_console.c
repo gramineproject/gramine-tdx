@@ -79,7 +79,7 @@ static int handle_rq(uint16_t host_used_idx, bool* out_received) {
         }
 
         uint64_t addr = vm_shared_readq(&g_console->rq->desc[desc_idx].addr);
-        uint32_t size = vm_shared_readl(&g_console->rq->desc[desc_idx].len);
+        uint32_t size = vm_shared_readl(&g_console->rq->used->ring[used_idx].len);
 
         if (addr < (uintptr_t)g_console->shared_rq_buf ||
                 addr >= (uintptr_t)g_console->shared_rq_buf + VIRTIO_CONSOLE_SHARED_BUF_SIZE) {
@@ -106,16 +106,7 @@ static int handle_rq(uint16_t host_used_idx, bool* out_received) {
         char* rq_buf_addr = g_console->rq_buf + g_console->rq_buf_pos;
         vm_shared_memcpy(rq_buf_addr, (void*)addr, size);
 
-        /* host may put messages that contain NUL symbols, find the first one and use it as delim */
-        size_t end_of_msg = 0;
-        while (end_of_msg < size && rq_buf_addr[end_of_msg])
-            end_of_msg++;
-        g_console->rq_buf_pos += end_of_msg;
-
-        vm_shared_writeq(&g_console->rq->desc[desc_idx].addr,  addr);
-        vm_shared_writel(&g_console->rq->desc[desc_idx].len,   VIRTIO_CONSOLE_ITEM_SIZE);
-        vm_shared_writew(&g_console->rq->desc[desc_idx].flags, VIRTQ_DESC_F_WRITE);
-        vm_shared_writew(&g_console->rq->desc[desc_idx].next,  0);
+        g_console->rq_buf_pos += size;
 
         uint16_t avail_idx = g_console->rq->cached_avail_idx;
         g_console->rq->cached_avail_idx++;
