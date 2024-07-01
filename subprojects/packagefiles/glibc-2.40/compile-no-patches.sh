@@ -36,6 +36,9 @@ log "preparing sources..."
 rm -rf "$PRIVATE_DIR"
 cp -ar "$VENDOR_SOURCE_DIR" "$PRIVATE_DIR"
 
+# this patch is needed to build glibc itself (ported bug fix)
+patch --quiet -p1 --directory "$PRIVATE_DIR" <"$CURRENT_SOURCE_DIR"/fix-fortify-source.patch
+
 BUILDDIR="$PRIVATE_DIR"/build
 
 mkdir -p "$BUILDDIR"
