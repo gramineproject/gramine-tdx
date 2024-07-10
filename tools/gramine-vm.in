@@ -91,9 +91,9 @@ QEMU_CPU_NUM=${QEMU_CPU_NUM:-"1"}
 QEMU_PATH="qemu"
 QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc \
     -m $QEMU_MEM_SIZE -smp $QEMU_CPU_NUM"
-QEMU_OPTS="-enable-kvm -vga none -display none -no-reboot -monitor none -machine hpet=off \
-    -object memory-backend-file,id=mem,size=$QEMU_MEM_SIZE,mem-path=/dev/shm,share=on \
-    -numa node,memdev=mem"
+QEMU_OPTS="-enable-kvm -vga none -display none -no-reboot -monitor none \
+    -object memory-backend-memfd,id=mem,size=$QEMU_MEM_SIZE,private=on \
+    -M memory-backend=mem,hpet=off"
 
 if [ "$TDSHIM_PAL_PATH" == "" ]; then
 QEMU_MACHINE="-M q35,kernel_irqchip=split"
