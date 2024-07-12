@@ -36,15 +36,8 @@ int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
      *
      * Note the `static` keyword -- all arrays are allocated in BSS.
      */
-    static struct pal_cache_info caches[4] = {
-        { .type = CACHE_TYPE_DATA, .level = 1, .size = 32 * 1024,
-          .coherency_line_size = 64, .number_of_sets = 64, .physical_line_partition = 1 },
-        { .type = CACHE_TYPE_INSTRUCTION, .level = 1, .size = 32 * 1024,
-          .coherency_line_size = 64, .number_of_sets = 64, .physical_line_partition = 1 },
-        { .type = CACHE_TYPE_UNIFIED, .level = 2, .size = 256 * 1024,
-          .coherency_line_size = 64, .number_of_sets = 1024, .physical_line_partition = 1 },
-        { .type = CACHE_TYPE_UNIFIED, .level = 3, .size = 12288 * 1024,
-          .coherency_line_size = 64, .number_of_sets = 12288, .physical_line_partition = 1 },
+    static struct pal_cache_info caches[MAX_NUM_CPUS * MAX_CACHES] = {
+        0 /* to be filled below */
     };
     static struct pal_cpu_thread_info threads[MAX_NUM_CPUS] = {
         0 /* to be filled below */
@@ -60,13 +53,48 @@ int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
     };
     static size_t distances[1] = { 10 };
 
+    size_t caches_cnt = 0;
+    /* add one shared L3 */
+    caches[caches_cnt].type  = CACHE_TYPE_UNIFIED;
+    caches[caches_cnt].level = 3;
+    caches[caches_cnt].size  = 12288 * 1024;
+    caches[caches_cnt].coherency_line_size     = 64;
+    caches[caches_cnt].number_of_sets          = 12288;
+    caches[caches_cnt].physical_line_partition = 1;
+    caches_cnt++;
+
     for (size_t i = 0; i < g_num_cpus; i++) {
         threads[i].is_online = true;
         threads[i].core_id = i;
-        threads[i].ids_of_caches[0] = 0;
-        threads[i].ids_of_caches[1] = 1;
-        threads[i].ids_of_caches[2] = 2;
-        threads[i].ids_of_caches[3] = 3;
+
+        caches[caches_cnt].type  = CACHE_TYPE_DATA;
+        caches[caches_cnt].level = 1;
+        caches[caches_cnt].size  = 32 * 1024;
+        caches[caches_cnt].coherency_line_size     = 64;
+        caches[caches_cnt].number_of_sets          = 64;
+        caches[caches_cnt].physical_line_partition = 1;
+        threads[i].ids_of_caches[0] = caches_cnt;
+        caches_cnt++;
+
+        caches[caches_cnt].type  = CACHE_TYPE_INSTRUCTION;
+        caches[caches_cnt].level = 1;
+        caches[caches_cnt].size  = 32 * 1024;
+        caches[caches_cnt].coherency_line_size     = 64;
+        caches[caches_cnt].number_of_sets          = 64;
+        caches[caches_cnt].physical_line_partition = 1;
+        threads[i].ids_of_caches[1] = caches_cnt;
+        caches_cnt++;
+
+        caches[caches_cnt].type  = CACHE_TYPE_UNIFIED;
+        caches[caches_cnt].level = 2;
+        caches[caches_cnt].size  = 256 * 1024;
+        caches[caches_cnt].coherency_line_size     = 64;
+        caches[caches_cnt].number_of_sets          = 1024;
+        caches[caches_cnt].physical_line_partition = 1;
+        threads[i].ids_of_caches[2] = caches_cnt;
+        caches_cnt++;
+
+        threads[i].ids_of_caches[3] = /* shared L3 */0;
 
         cores[i].socket_id = 0;
         cores[i].node_id = 0;
@@ -79,7 +107,7 @@ int pal_common_get_topo_info(struct pal_topo_info* topo_info) {
     topo_info->numa_nodes = numa_nodes;
     topo_info->numa_distance_matrix = distances;
 
-    topo_info->caches_cnt = 4;
+    topo_info->caches_cnt = /* per-CPU L1d, L1i, L2 */g_num_cpus * 3 + /* shared L3 */1;
     topo_info->threads_cnt = g_num_cpus;
     topo_info->cores_cnt = g_num_cpus;
     topo_info->sockets_cnt = 1;
