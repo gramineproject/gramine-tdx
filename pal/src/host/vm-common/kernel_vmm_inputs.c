@@ -130,11 +130,15 @@ int cmdline_read_gramine_envs(const char* envs, int* out_envp_cnt, const char** 
 
 static int find_fw_cfg_selector(const char* fw_cfg_name, uint16_t* out_selector,
                                 uint32_t* out_size) {
-    uint32_t fw_cfg_files_count = 0;
-    uint8_t* fw_cfg_files_count_raw = (uint8_t*)&fw_cfg_files_count;
+    uint32_t fw_cfg_files_count;
+
+    uint8_t fw_cfg_files_count_raw[4];
     vm_portio_writew(FW_CFG_PORT_SEL, FW_CFG_FILE_DIR);
     for (size_t i = 0; i < sizeof(fw_cfg_files_count); i++)
         fw_cfg_files_count_raw[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
+    fw_cfg_files_count = fw_cfg_files_count_raw[0] + (fw_cfg_files_count_raw[1] << 8)
+                                                   + (fw_cfg_files_count_raw[2] << 16)
+                                                   + (fw_cfg_files_count_raw[3] << 24);
 
     /* QEMU provides in big-endian, but our x86-64 CPU is little-endian */
     fw_cfg_files_count = __builtin_bswap32(fw_cfg_files_count);
