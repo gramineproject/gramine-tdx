@@ -79,6 +79,7 @@ static int shared_memory_init(uint64_t gpa_width) {
             /* done */
             break;
         }
+        failed_addr &= ~g_shared_bit; /* MAPGPA returns first failing addr with shared bit set */
         if (!(map_addr <= failed_addr && failed_addr < map_addr + map_size)) {
             /* sanity check, just in case */
             return -PAL_ERROR_DENIED;
