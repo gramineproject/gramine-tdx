@@ -157,6 +157,11 @@ struct pal_public_state {
     size_t initial_mem_ranges_len;
 
     /*
+     * App context on syscall
+     */
+    uint64_t vm_user_rip_offset;
+
+    /*
      * Host information
      */
 

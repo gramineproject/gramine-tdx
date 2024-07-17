@@ -244,6 +244,15 @@ void prepare_sigframe(PAL_CONTEXT* context, siginfo_t* siginfo, void* handler, v
 
     pal_context_to_ucontext(&sigframe->uc, context);
 
+    if (!strcmp(g_pal_public_state->host_type, "VM") ||
+            !strcmp(g_pal_public_state->host_type, "TDX")) {
+        /* Rewire saved sigframe RIP to the where-to-return app code RIP (saved in PAL's TCB) */
+        uint64_t user_rip;
+        void* user_rip_ptr = (char*)pal_get_tcb() + g_pal_public_state->vm_user_rip_offset;
+        memcpy(&user_rip, user_rip_ptr, sizeof(user_rip));
+        ucontext_set_ip(&sigframe->uc, user_rip);
+    }
+
     /* XXX: Currently we assume that `struct libos_xstate`, `PAL_XREGS_STATE` and `struct _fpstate`
      * (just the header) are the very same structure. This mess needs to be fixed. */
     static_assert(sizeof(struct libos_xstate) == sizeof(PAL_XREGS_STATE),
