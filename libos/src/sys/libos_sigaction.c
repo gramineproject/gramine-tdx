@@ -63,10 +63,25 @@ long libos_syscall_rt_sigaction(int signum, const struct __kernel_sigaction* act
 
 long libos_syscall_rt_sigreturn(void) {
     PAL_CONTEXT* context = LIBOS_TCB_GET(context.regs);
+    void* orig_rip = (void*)pal_context_get_ip(context);
 
     __sigset_t new_mask;
     restore_sigreturn_context(context, &new_mask);
     clear_illegal_signals(&new_mask);
+
+    /* FIXME: make this VM/TDX PAL logic more generic */
+    if (!strcmp(g_pal_public_state->host_type, "VM") ||
+            !strcmp(g_pal_public_state->host_type, "TDX")) {
+        /*
+         * Rewire context RIP to the VM/TDX PAL sysret trampoline:
+         *   - orig_rip contains the RIP of the sysret trampoline code (see PAL's kernel_events.S)
+         *   - restored rip contains the RIP of the where-to-return app code
+         */
+        void* restored_rip = (void*)pal_context_get_ip(context);
+        void* user_rip_ptr = (char*)pal_get_tcb() + g_pal_public_state->vm_user_rip_offset;
+        memcpy(user_rip_ptr, &restored_rip, sizeof(restored_rip));
+        pal_context_set_ip(context, (uintptr_t)orig_rip);
+    }
 
     struct libos_thread* current = get_cur_thread();
     lock(&current->lock);
