@@ -11,4 +11,7 @@
 #define MSR_LSTAR        0xc0000082 /* target 64-bit RIP on `syscall` instruction */
 #define MSR_SYSCALL_MASK 0xc0000084 /* RFLAGS mask to apply on `syscall` instruction */
 
+/* rt_sigreturn has a special return-from-syscall path, see kernel_events.S */
+#define SYSCALL_RT_SIGRETURN 15
+
 int syscalls_init(void);

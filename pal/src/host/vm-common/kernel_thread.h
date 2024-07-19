@@ -83,6 +83,15 @@ struct thread {
     struct thread_context context;
 
     struct thread_irq_pseudo_stack irq_pseudo_stack;
+
+    /* per-thread scratch registers for returning to userspace from rt_sigreturn() syscall;
+     * sigreturn flow is different from normal-return-to-userspace sysret flow in that sigreturn
+     * uses iretq instruction which requires RIP,RSP,RFLAGS to be located on a (pseudo) stack;
+     * see also kernel_events.S */
+    uint64_t sigreturn_user_rsp;
+    uint64_t sigreturn_user_rax;
+    uint64_t sigreturn_pseudo_rsp; /* &sigreturn_pseudo_stack + sizeof(thread_irq_pseudo_stack) */
+    struct thread_irq_pseudo_stack sigreturn_pseudo_stack;
 };
 DEFINE_LISTP(thread);
 

@@ -4,11 +4,14 @@
 
 #include "kernel_multicore.h"
 #include "kernel_sched.h"
+#include "kernel_syscalls.h"
 #include "kernel_xsave.h"
 
 const char* generated_offsets_name = "PAL_VM";
 
 const struct generated_offset generated_offsets[] = {
+    DEFINE(SYSCALL_RT_SIGRETURN, SYSCALL_RT_SIGRETURN),
+
     DEFINE(VM_XSAVE_ALIGN, VM_XSAVE_ALIGN),
     DEFINE(MSR_IA32_GS_BASE, MSR_IA32_GS_BASE),
     DEFINE(MSR_IA32_GS_KERNEL_BASE, MSR_IA32_GS_KERNEL_BASE),
@@ -25,6 +28,10 @@ const struct generated_offset generated_offsets[] = {
     /* struct pal_tcb_vm */
     OFFSET(PAL_TCB_LIBOS, pal_tcb_vm, common.libos_tcb),
     OFFSET(PAL_TCB_VM_USER_RIP, pal_tcb_vm, kernel_thread.context.user_rip),
+
+    OFFSET(PAL_TCB_VM_SIGRETURN_USER_RSP, pal_tcb_vm, kernel_thread.sigreturn_user_rsp),
+    OFFSET(PAL_TCB_VM_SIGRETURN_USER_RAX, pal_tcb_vm, kernel_thread.sigreturn_user_rax),
+    OFFSET(PAL_TCB_VM_SIGRETURN_PSEUDO_RSP, pal_tcb_vm, kernel_thread.sigreturn_pseudo_rsp),
 
     OFFSET(PAL_TCB_VM_CONTEXT_R8, pal_tcb_vm, kernel_thread.context.r8),
     OFFSET(PAL_TCB_VM_CONTEXT_R9, pal_tcb_vm, kernel_thread.context.r9),
