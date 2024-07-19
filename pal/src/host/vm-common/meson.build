@@ -23,6 +23,7 @@ pal_vm_common_sources = files(
     'pal_common_console.c',
     'pal_common_eventfd.c',
     'pal_common_events.c',
+    'pal_common_exception.c',
     'pal_common_files.c',
     'pal_common_misc.c',
     'pal_common_object.c',
