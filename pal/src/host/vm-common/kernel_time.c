@@ -58,9 +58,14 @@ int delay(uint64_t delay_us, bool* continue_gate) {
     uint64_t curr_tsc = get_tsc();
     uint64_t wait_until_tsc = curr_tsc + delay_us * g_tsc_mhz;
 
+    uint64_t next_gate_check_tsc = curr_tsc + 1000 * g_tsc_mhz; /* check every 1ms */
+
     while (curr_tsc < wait_until_tsc) {
-        if (continue_gate && __atomic_load_n(continue_gate, __ATOMIC_ACQUIRE))
-            break;
+        if (curr_tsc > next_gate_check_tsc) {
+            if (continue_gate && __atomic_load_n(continue_gate, __ATOMIC_ACQUIRE))
+                break;
+            next_gate_check_tsc = curr_tsc + 1000 * g_tsc_mhz;
+        }
         CPU_RELAX();
         curr_tsc = get_tsc();
     }
