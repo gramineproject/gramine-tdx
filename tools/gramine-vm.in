@@ -92,7 +92,7 @@ QEMU_PATH="qemu"
 QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc \
     -m $QEMU_MEM_SIZE -smp $QEMU_CPU_NUM"
 QEMU_OPTS="-enable-kvm -vga none -display none -no-reboot -monitor none \
-    -object memory-backend-memfd,id=mem,size=$QEMU_MEM_SIZE,private=on \
+    -object memory-backend-memfd,id=mem,size=$QEMU_MEM_SIZE,share=on \
     -M memory-backend=mem,hpet=off"
 
 if [ "$TDSHIM_PAL_PATH" == "" ]; then
