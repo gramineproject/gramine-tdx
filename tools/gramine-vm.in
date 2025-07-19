@@ -92,7 +92,7 @@ QEMU_PATH="qemu"
 QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc \
     -m $QEMU_MEM_SIZE -smp $QEMU_CPU_NUM"
 QEMU_OPTS="-enable-kvm -vga none -display none -no-reboot -monitor none \
-    -object memory-backend-memfd,id=mem,size=$QEMU_MEM_SIZE,private=on \
+    -object memory-backend-memfd,id=mem,size=$QEMU_MEM_SIZE,share=on \
     -M memory-backend=mem,hpet=off"
 
 if [ "$TDSHIM_PAL_PATH" == "" ]; then
@@ -100,7 +100,7 @@ QEMU_MACHINE="-M q35,kernel_irqchip=split"
 QEMU_BINARIES="-kernel $LIBPAL_PATH -device loader,file=$BIOS_PATH"
 else
 QEMU_MACHINE="-M q35,kernel_irqchip=split,confidential-guest-support=tdx \
-    -object tdx-guest,id=tdx,quote-generation-service=vsock:2:4050"
+    -object {\"qom-type\":\"tdx-guest\",\"id\":\"tdx\",\"quote-generation-socket\":{\"type\":\"vsock\",\"cid\":\"2\",\"port\":\"4050\"}}"
 QEMU_BINARIES="-bios $TDSHIM_PAL_PATH"
 fi
 
