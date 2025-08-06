@@ -95,13 +95,12 @@ QEMU_OPTS="-enable-kvm -vga none -display none -no-reboot -monitor none \
     -object memory-backend-memfd,id=mem,size=$QEMU_MEM_SIZE,share=on \
     -M memory-backend=mem,hpet=off"
 
-QEMU_TDX_OBJECT=""
 if [ "$TDSHIM_PAL_PATH" == "" ]; then
 QEMU_MACHINE="-M q35,kernel_irqchip=split"
 QEMU_BINARIES="-kernel $LIBPAL_PATH -device loader,file=$BIOS_PATH"
 else
-QEMU_MACHINE="-M q35,kernel_irqchip=split,confidential-guest-support=tdx -object"
-QEMU_TDX_OBJECT='{"qom-type":"tdx-guest","id":"tdx","quote-generation-socket":{"type":"vsock","cid":"2","port":"4050"}}'
+QEMU_MACHINE="-M q35,kernel_irqchip=split,confidential-guest-support=tdx \
+    -object {\"qom-type\":\"tdx-guest\",\"id\":\"tdx\",\"quote-generation-socket\":{\"type\":\"vsock\",\"cid\":\"2\",\"port\":\"4050\"}}"
 QEMU_BINARIES="-bios $TDSHIM_PAL_PATH"
 fi
 
@@ -172,14 +171,8 @@ GRAMINE_ENVS="-gramine-envs $GRAMINE_ENVS -gramine-envs-end"
 
 CMD=("${ENVS[@]}")
 CMD+=("${PREFIX[@]}")
-
-if [ "$TDSHIM_PAL_PATH" == "" ]; then
-    CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE)
-else
-    CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE "$QEMU_TDX_OBJECT")
-fi
-
-CMD+=($QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK $QEMU_BINARIES \
+CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
+        $QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK $QEMU_BINARIES \
         -fw_cfg name=opt/gramine/pwd,string="$PWD" \
         -fw_cfg name=opt/gramine/args,string="$GRAMINE_ARGS" \
         -fw_cfg name=opt/gramine/envs,string="$GRAMINE_ENVS" \
