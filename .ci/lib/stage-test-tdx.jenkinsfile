@@ -1,0 +1,28 @@
+stage('test-tdx') {
+    if (env.RA_TYPE == null) {
+        env.RA_TYPE = 'epid'
+    }
+
+    timeout(time: 5, unit: 'MINUTES') {
+        sh '''
+            cd CI-Examples/helloworld
+            make ${MAKEOPTS}
+            make ${MAKEOPTS} check
+        '''
+    }
+    post {
+        always {
+            sh '''
+                # Clean up vhostfs pid files
+                for f in /tmp/gramine_vhostfs_*.pid; do
+                [ -e "$f" ] || continue
+                pid=$(cat "$f" 2>/dev/null)
+                [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
+                rm -f "$f"
+                done
+                # Clean up vhostfs sockets
+                rm -f /tmp/gramine_vhostfs_*
+            '''
+        }
+    }
+}
