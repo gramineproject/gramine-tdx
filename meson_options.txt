@@ -33,6 +33,10 @@ option('sgx_driver_include_path', type: 'string',
 option('sgx_driver_device', type: 'string',
     description: 'Path to "enclave" device in /dev (default value depends on sgx_driver)')
 
+option('tdshim_path', type: 'string',
+    value: '$HOME/td-shim',
+    description: 'Path to TD-shim root directory (default: $HOME/td-shim)')
+
 option('syslibdir', type: 'string',
     description: 'Path to the system library directory')
 
