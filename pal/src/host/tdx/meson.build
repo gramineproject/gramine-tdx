@@ -100,13 +100,26 @@ libpal_tdx = executable('pal',
     install_dir: pkglibdir / 'tdx',
 )
 
-# FIXME: TD-shim should be installed somewhere global
 meson.add_install_script('/bin/sh', '-c',
-    ('cd "$HOME"/td-shim && cargo run -p td-shim-tools --bin td-shim-ld -- ' +
-     'target/x86_64-unknown-none/release/ResetVector.bin ' +
-     'target/x86_64-unknown-none/release/td-shim ' +
-     '-t executable -p "$MESON_INSTALL_DESTDIR_PREFIX"/@0@/gramine/tdx/pal ' +
-     '-o "$MESON_INSTALL_DESTDIR_PREFIX"/@0@/gramine/tdx/tdshim-pal').format(get_option('libdir')))
+    ('tdshim="@0@"; ' +
+     'if [ ! -d "$tdshim" ]; then ' +
+         'echo "ERROR: TD-shim path not found: $tdshim"; ' +
+         'echo "Set -Dtdshim_path to the TD-shim repo root."; ' +
+         'exit 1; ' +
+     'fi; ' +
+     'rv="$tdshim/target/x86_64-unknown-none/release/ResetVector.bin"; ' +
+     'shim="$tdshim/target/x86_64-unknown-none/release/td-shim"; ' +
+     'if [ ! -f "$rv" ] || [ ! -f "$shim" ]; then ' +
+         'echo "ERROR: TD-shim artifacts not found (expected $rv and $shim)."; ' +
+         'echo "Build TD-shim first."; ' +
+         'exit 1; ' +
+     'fi; ' +
+     'cd "$tdshim" && cargo run -p td-shim-tools --bin td-shim-ld -- ' +
+     '"$rv" "$shim" ' +
+     '-t executable -p "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/pal ' +
+     '-o "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/tdshim-pal')
+     .format(get_option('tdshim_path'), get_option('libdir'))
+)
 
 libpal_tdx_dep = declare_dependency(
     link_with: libpal_tdx,
