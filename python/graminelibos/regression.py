@@ -19,6 +19,8 @@ fspath = getattr(os, 'fspath', str) # pylint: disable=invalid-name
 HAS_AVX = os.environ.get('AVX') == '1'
 HAS_EDMM = os.environ.get('EDMM') == '1'
 HAS_SGX = os.environ.get('SGX') == '1'
+HAS_TDX = os.environ.get('TDX') == '1'
+HAS_VM  = os.environ.get('VM')  == '1'
 IS_VM = os.environ.get('IS_VM') == '1'
 ON_X86 = os.uname().machine in ['x86_64']
 USES_MUSL = os.environ.get('GRAMINE_MUSL') == '1'
@@ -162,10 +164,61 @@ def run_command(cmd, *, timeout, open_fds_limit=None, can_fail=False, **kwds):
             raise subprocess.CalledProcessError(proc.returncode, cmd, raw_stdout, raw_stderr)
 
         return main_returncode, stdout, stderr
+    
+def cleanup_vm(gramine_vm_id):
+    sock = f"/tmp/gramine_vhostfs_{gramine_vm_id}"
+    pidf = f"{sock}.pid"
 
+    in_use = False
+    try:
+        r = subprocess.run(["lsof", "-t", "--", pidf],
+                           capture_output=True, text=True, check=False)
+        in_use = (r.returncode == 0 and r.stdout.strip() != "")
+    except FileNotFoundError:
+        in_use = False
+
+    if in_use and os.path.exists(pidf):
+        try:
+            with open(pidf, "r", encoding="utf-8") as f:
+                pid_txt = f.read().strip()
+            pid = int("".join(ch for ch in pid_txt if ch.isdigit()))
+        except Exception:
+            pid = None
+
+        if pid is not None:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.kill(pid, sig)
+                except ProcessLookupError:
+                    break
+                deadline = time.time() + (1.0 if sig == signal.SIGTERM else 0.5)
+                while time.time() < deadline:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        deadline = 0  # dead
+                        break
+                    time.sleep(0.05)
+
+    for path in (pidf, sock):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+def sq(s: str) -> str:
+    return "'" + s + "'"
 
 class RegressionTestCase(unittest.TestCase):
-    DEFAULT_TIMEOUT = (20 if HAS_SGX else 10)
+    # TDX takes extra long time
+    if HAS_TDX:
+        DEFAULT_TIMEOUT = 150
+    elif HAS_VM:
+        DEFAULT_TIMEOUT = 120
+    elif HAS_SGX:
+        DEFAULT_TIMEOUT = 20
+    else:
+        DEFAULT_TIMEOUT = 10
 
     def get_env(self, name):
         try:
@@ -176,7 +229,16 @@ class RegressionTestCase(unittest.TestCase):
     @property
     def pal_path(self):
         # pylint: disable=protected-access
-        return pathlib.Path(graminelibos._CONFIG_PKGLIBDIR) / ('sgx' if HAS_SGX else 'direct')
+        base = pathlib.Path(graminelibos._CONFIG_PKGLIBDIR)
+        if HAS_TDX:
+            sub = 'tdx'
+        elif HAS_VM:
+            sub = 'vm'
+        elif HAS_SGX:
+            sub = 'sgx'
+        else:
+            sub = 'direct'
+        return base / sub
 
     @property
     def libpal_path(self):
@@ -185,6 +247,14 @@ class RegressionTestCase(unittest.TestCase):
     @property
     def loader_path(self):
         return self.pal_path / 'loader'
+    
+    @property
+    def libpal_vm_path(self):
+        return (self.pal_path / 'tdshim-pal') if HAS_TDX else (self.pal_path / 'pal')
+    
+    @property
+    def bios_path(self):
+        return self.pal_path / 'bios'
 
     def has_debug(self):
         p = subprocess.run(['objdump', '-x', fspath(self.libpal_path)],
@@ -193,6 +263,8 @@ class RegressionTestCase(unittest.TestCase):
         return '.debug_info' in dump
 
     def run_gdb(self, args, gdb_script, **kwds):
+        if HAS_TDX or HAS_VM:
+            return self.run_vm(args, prefix=None, run_gdb=True, **kwds)
         prefix = ['gdb', '-q']
         env = os.environ.copy()
         if HAS_SGX:
@@ -208,7 +280,200 @@ class RegressionTestCase(unittest.TestCase):
 
         return self.run_binary(args, prefix=prefix, env=env, **kwds)
 
+    # mirror gramine-vm.in
+    def run_vm(self, args, *, timeout=None, prefix=None, run_gdb=False, **kwds):
+        timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
+                   else self.DEFAULT_TIMEOUT)
+
+        application, rest = args[0], list(args[1:])
+
+        qemu_gdb = ('-gdb tcp::9000 -S' if run_gdb else '')
+
+        def pick_mem():
+            import re
+
+            manifest_base = os.environ.get('GRAMINE_MANIFEST', f'{application}.manifest')
+            manifests = {
+                'tdx': manifest_base + '.tdx',
+                'sgx': manifest_base + '.sgx',
+            }
+
+            size_str = ''
+            for type, file in manifests.items():
+                try:
+                    with open(file, 'rb') as f:
+                        manifest_data = f.read()
+                    manifest = graminelibos.Manifest.loads(manifest_data.decode('utf-8'))
+                    size_str = manifest[type]['enclave_size']
+                    break
+                except Exception:
+                    continue
+            else:
+                return (os.environ.get('GRAMINE_RAM_SIZE') or '8G')
+
+            unit = 1
+            if size_str.endswith('G'):
+                unit = 1024 * 1024 * 1024
+            elif size_str.endswith('M'):
+                unit = 1024 * 1024
+            elif size_str.endswith('K'):
+                unit = 1024
+
+            try:
+                size = int(re.search(r'\d+', size_str).group())
+                return size_str if unit * size > 1024 * 1024 * 1024 else '1G'
+            except Exception:
+                return (os.environ.get('GRAMINE_RAM_SIZE') or '8G')
+
+        mem_size = pick_mem()
+        cpu_num = (os.environ.get('QEMU_CPU_NUM')
+                   or os.environ.get('GRAMINE_CPU_NUM')
+                   or '1')
+
+        qemu = 'qemu'
+
+        qemu_vm   = (f'-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc '
+                     f'-m {mem_size} -smp {cpu_num}')
+        qemu_opts = (f'-enable-kvm -vga none -display none -no-reboot -monitor none '
+                     f'-object memory-backend-memfd,id=mem,size={mem_size},share=on '
+                     f'-M memory-backend=mem,hpet=off')
+
+        if not HAS_TDX:
+            qemu_machine = '-M q35,kernel_irqchip=split'
+            qemu_binaries = (
+                f'-kernel {sq(fspath(self.libpal_vm_path))} -device loader,file={sq(fspath(self.bios_path))}'
+            )
+        else:
+            qemu_machine = (
+                '-M q35,kernel_irqchip=split,confidential-guest-support=tdx '
+                '-object \'{"qom-type":"tdx-guest","id":"tdx","quote-generation-socket":{"type": "vsock", "cid":"2","port":"4050"}}\''
+            )
+            qemu_binaries = f'-bios {sq(fspath(self.libpal_vm_path))}'
+
+        def determine_vm_id():
+            import psutil
+            import re
+
+            # Identify the qemu processes
+            qemu_processes = []
+            try:
+                for process in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    if 'qemu' in process.info['name']:
+                        qemu_processes.append(process)
+            except Exception:
+                raise SystemExit('Exception while iterating over system processes.')
+
+            # Identify the occupied guest-cids
+            used_cids = set()
+            for process in qemu_processes:
+                pid = process.info['pid']  # retained from original (even if unused)
+                cmdline = ' '.join(process.info['cmdline'])
+                match = re.search(r'guest-cid=(\d+)', cmdline)
+                guest_cid = int(match.group(1)) if match else None
+                if guest_cid is not None:
+                    used_cids.add(guest_cid)
+
+            # Identify the next available Gramine VM ID based on the uniquely assigned vsock guest-cid.
+            cid = 10
+            while cid in used_cids:
+                cid += 1
+
+            # Check that the guest-cid is in a valid range
+            if cid > 2 and cid < 0xffffffff:
+                return cid
+            else:
+                raise SystemExit('Invalid chosen CID value: ' + str(cid) + '. It must be > 2 and < 0xffffffff.')
+
+        try:
+            gramine_vm_id = determine_vm_id()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+            msg  = '' if (e.code is None or isinstance(e.code, int)) else str(e.code)
+            logging.error("Error: determining Gramine-VM ID failed with status: %s", code)
+            if msg:
+                logging.error("Error message: %s", msg)
+            raise
+
+        qemu_virtio_console = ('-device virtio-serial,iommu_platform=off,romfile= '
+                               '-chardev stdio,id=virtioconsole0 '
+                               '-device virtconsole,chardev=virtioconsole0')
+        qemu_virtio_fs      = (f'-chardev socket,path=/tmp/gramine_vhostfs_{gramine_vm_id},id=vhostfs '
+                               f'-device vhost-user-fs-pci,iommu_platform=off,queue-size=1024,chardev=vhostfs,tag=graminefs')
+        qemu_virtio_vsock   = (f'-device vhost-vsock-pci,iommu_platform=off,guest-cid={gramine_vm_id},id=vsockdev')
+
+        escaped_app = application.replace(',', ',,')
+        gramine_args = f'-gramine-args init "{escaped_app}"'
+        if rest:
+            gramine_args += ' ' + ' '.join(rest)
+        gramine_args += ' -gramine-args-end'
+
+        def get_envs():
+            env_str = ''
+            for name, value in os.environ.items():
+                env_str += ('\"{0}={1}\" '.format(name, value).replace(',', ',,'))
+            return env_str
+
+        gramine_envs = '-gramine-envs ' + get_envs() + ' -gramine-envs-end'
+
+        if prefix is None:
+            prefix = []
+
+        envs = []
+
+        parts = [
+            'exec',
+            'env',
+            *envs,
+            *prefix,
+            qemu,
+            qemu_gdb,
+            qemu_vm,
+            qemu_opts,
+            qemu_machine,
+            qemu_virtio_console,
+            qemu_virtio_fs,
+            qemu_virtio_vsock,
+            qemu_binaries,
+            f'-fw_cfg name=opt/gramine/pwd,string={sq(os.getcwd())}',
+            f'-fw_cfg name=opt/gramine/args,string={sq(gramine_args)}',
+            f'-fw_cfg name=opt/gramine/envs,string={sq(gramine_envs)}',
+            f'-fw_cfg name=opt/gramine/unixtime_s,string={str(int(time.time()))}',
+        ]
+        parts = [p for p in parts if p]
+
+        sock = f'/tmp/gramine_vhostfs_{gramine_vm_id}'
+        pidf = f'{sock}.pid'
+
+        shell_line = ' '.join([
+            # lsof check like the script
+            f'if lsof {pidf} >/dev/null 2>&1; then '
+            f'echo "Error: {pidf} is already in use."; exit 2; fi;',
+            # start virtiofsd in background
+            'virtiofsd',
+            f'--socket-path {sock}',
+            '--shared-dir /',
+            '--log-level error',
+            '--sandbox none',
+            '--no-announce-submounts',
+            '&',
+            # wait until socket appears
+            f'while [ ! -e {sock} ]; do sleep 0.1; done;',
+            # run QEMU
+            ' '.join(parts),
+        ])
+
+        cmd = ['bash', '-c', shell_line]
+        try:
+            _returncode, stdout, stderr = run_command(cmd, timeout=timeout, **kwds)
+        finally:
+            cleanup_vm(gramine_vm_id)
+        return stdout, stderr
+
     def run_binary(self, args, *, timeout=None, prefix=None, **kwds):
+        # VM/TDX path (QEMU)
+        if HAS_VM or HAS_TDX:
+            return self.run_vm(args, timeout=timeout, prefix=prefix, run_gdb=False, **kwds)
+
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
             else self.DEFAULT_TIMEOUT)
 

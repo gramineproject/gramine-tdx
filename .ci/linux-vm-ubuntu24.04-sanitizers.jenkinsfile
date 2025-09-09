@@ -1,0 +1,38 @@
+node('tdx && noble') {
+    checkout scm
+
+    env.VM = '1'
+
+    load '.ci/lib/config-docker.jenkinsfile'
+    
+    // This seccomp file is based on docker_seccomp_aug_2022.json
+    // add 'name_to_handle_at' as required by virtiofsd
+    env.DOCKER_ARGS_COMMON +=
+        " --security-opt seccomp=${env.WORKSPACE}/scripts/docker_seccomp_aug_2025.json"
+    
+    // only root and `kvm` group can access /dev/kvm, so add `kvm` GID to the in-Docker user
+    kvm_gid = sh(returnStdout: true, script: 'getent group kvm | cut -d: -f3').trim()
+    env.DOCKER_ARGS_COMMON += ' --group-add ' + kvm_gid
+
+    env.DOCKER_ARGS_COMMON += ' --device=/dev/kvm:/dev/kvm'
+
+    env.DOCKER_ARGS_TDX    += ' --cap-add DAC_READ_SEARCH'
+
+    docker.build(
+        "local:${env.BUILD_TAG}",
+        '-f .ci/ubuntu24.04-tdx.dockerfile .'
+    ).inside("${env.DOCKER_ARGS_COMMON} ${env.DOCKER_ARGS_SGX} ${env.DOCKER_ARGS_TDX}") {
+        load '.ci/lib/config.jenkinsfile'
+        load '.ci/lib/config-clang.jenkinsfile'
+        load '.ci/lib/config-debug.jenkinsfile'
+        load '.ci/lib/config-ubsan.jenkinsfile'
+        load '.ci/lib/config-asan.jenkinsfile'
+
+        load '.ci/lib/stage-lint.jenkinsfile'
+        load '.ci/lib/stage-clean-check-prepare.jenkinsfile'
+        load '.ci/lib/stage-build-vm.jenkinsfile'
+        load '.ci/lib/stage-test.jenkinsfile'
+        load '.ci/lib/stage-test-vm.jenkinsfile'
+        load '.ci/lib/stage-clean-check.jenkinsfile'
+    }
+}

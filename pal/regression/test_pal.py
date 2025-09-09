@@ -3,6 +3,7 @@ import collections
 import mmap
 import pathlib
 import random
+import re
 import shutil
 import string
 import subprocess
@@ -11,42 +12,50 @@ import unittest
 from graminelibos.regression import (
     HAS_EDMM,
     HAS_SGX,
+    HAS_TDX,
+    HAS_VM,
     ON_X86,
     RegressionTestCase,
 )
 
+# Need to capture the output from VM/TDX in stdout as all guest console output will be redirected by QEMU to host's stdout
 
 class TC_00_Basic(RegressionTestCase):
     def test_001_path_normalization(self):
-        _, stderr = self.run_binary(['normalize_path'])
+        stdout, stderr = self.run_binary(['normalize_path'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
-        self.assertIn("Success!\n", stderr)
+        self.assertIn("Success!\n", output)
 
     def test_002_avl_tree(self):
         _, _ = self.run_binary(['avl_tree_test'])
 
     def test_003_printf(self):
-        _, stderr = self.run_binary(['printf_test'])
-        self.assertIn("TEST OK", stderr)
+        stdout, stderr = self.run_binary(['printf_test'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn("TEST OK", output)
 
     def test_004_strtoll(self):
-        _, stderr = self.run_binary(['strtoll_test'])
-        self.assertIn("TEST OK", stderr)
+        stdout, stderr = self.run_binary(['strtoll_test'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn("TEST OK", output)
 
 
 class TC_00_BasicSet2(RegressionTestCase):
     @unittest.skipUnless(ON_X86, "x86-specific")
     def test_Exception2(self):
-        _, stderr = self.run_binary(['Exception2'])
-        self.assertIn('Enter Main Thread', stderr)
-        self.assertIn('failure in the handler: 0x', stderr)
-        self.assertNotIn('Leave Main Thread', stderr)
+        stdout, stderr = self.run_binary(['Exception2'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('Enter Main Thread', output)
+        self.assertIn('failure in the handler: 0x', output)
+        self.assertNotIn('Leave Main Thread', output)
 
     def test_File2(self):
-        _, stderr = self.run_binary(['File2'])
-        self.assertIn('Enter Main Thread', stderr)
-        self.assertIn('Hello World', stderr)
-        self.assertIn('Leave Main Thread', stderr)
+        stdout, stderr = self.run_binary(['File2'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('Enter Main Thread', output)
+        self.assertIn('Hello World', output)
+        self.assertIn('Leave Main Thread', output)
 
     def test_HelloWorld(self):
         stdout, _ = self.run_binary(['HelloWorld'])
@@ -54,49 +63,54 @@ class TC_00_BasicSet2(RegressionTestCase):
 
     def test_Pie(self):
         stdout, stderr = self.run_binary(['Pie'])
-        self.assertIn('start program: Pie', stderr)
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('start program: Pie', output)
         self.assertIn('Hello World', stdout)
 
     @unittest.skipIf(HAS_SGX, "Pipes must be created in two parallel threads under SGX")
     def test_Process4(self):
-        _, stderr = self.run_binary(['Process4'], timeout=5)
-        self.assertRegex(stderr, r'In process: .*Process4')
-        self.assertIn('wall time = ', stderr)
+        stdout, stderr = self.run_binary(['Process4'], timeout=5)
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertRegex(output, r'In process: .*Process4')
+        self.assertIn('wall time = ', output)
         for i in range(100):
-            self.assertIn('In process: Process4 %d ' % i, stderr)
+            self.assertIn('In process: Process4 %d ' % i, output)
 
     @unittest.skipUnless(ON_X86, "x86-specific")
     def test_Segment(self):
-        _, stderr = self.run_binary(['Segment'])
-        self.assertIn('Test OK', stderr)
+        stdout, stderr = self.run_binary(['Segment'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('Test OK', output)
 
 
 class TC_01_Bootstrap(RegressionTestCase):
     def test_100_basic_boostrapping(self):
-        _, stderr = self.run_binary(['Bootstrap'])
+        stdout, stderr = self.run_binary(['Bootstrap'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Basic Bootstrapping
-        self.assertIn('User Program Started', stderr)
+        self.assertIn('User Program Started', output)
 
         # One Argument Given
-        self.assertIn('# of Arguments: 1', stderr)
-        self.assertRegex(stderr, r'argv\[0\] = .*Bootstrap')
+        self.assertIn('# of Arguments: 1', output)
+        self.assertRegex(output, r'argv\[0\] = .*Bootstrap')
 
         # Control Block: Debug Stream (Inline)
-        self.assertIn('Written to Debug Stream', stderr)
+        self.assertIn('Written to Debug Stream', output)
 
         # Control Block: Allocation Alignment
-        self.assertIn('Allocation Alignment: {}'.format(mmap.ALLOCATIONGRANULARITY), stderr)
+        self.assertIn('Allocation Alignment: {}'.format(mmap.ALLOCATIONGRANULARITY), output)
 
     def test_101_basic_boostrapping_five_arguments(self):
-        _, stderr = self.run_binary(['Bootstrap', 'a', 'b', 'c', 'd'])
+        stdout, stderr = self.run_binary(['Bootstrap', 'a', 'b', 'c', 'd'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Five Arguments Given
-        self.assertIn('# of Arguments: 5', stderr)
-        self.assertIn('argv[1] = a', stderr)
-        self.assertIn('argv[2] = b', stderr)
-        self.assertIn('argv[3] = c', stderr)
-        self.assertIn('argv[4] = d', stderr)
+        self.assertIn('# of Arguments: 5', output)
+        self.assertIn('argv[1] = a', output)
+        self.assertIn('argv[2] = b', output)
+        self.assertIn('argv[3] = c', output)
+        self.assertIn('argv[4] = d', output)
 
     def test_102_cpuinfo(self):
         with open('/proc/cpuinfo') as file_:
@@ -104,19 +118,21 @@ class TC_01_Bootstrap(RegressionTestCase):
         cpuinfo = dict(map(str.strip, line.split(':'))
             for line in cpuinfo.split('\n'))
 
-        _, stderr = self.run_binary(['Bootstrap'])
+        stdout, stderr = self.run_binary(['Bootstrap'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         self.assertIn('CPU num: {}'.format(int(cpuinfo['processor']) + 1),
-            stderr)
-        self.assertIn('CPU vendor: {[vendor_id]}'.format(cpuinfo), stderr)
-        self.assertIn('CPU brand: {[model name]}'.format(cpuinfo), stderr)
-        self.assertIn('CPU family: {[cpu family]}'.format(cpuinfo), stderr)
-        self.assertIn('CPU model: {[model]}'.format(cpuinfo), stderr)
-        self.assertIn('CPU stepping: {[stepping]}'.format(cpuinfo), stderr)
+            output)
+        self.assertIn('CPU vendor: {[vendor_id]}'.format(cpuinfo), output)
+        self.assertIn('CPU brand: {[model name]}'.format(cpuinfo), output)
+        self.assertIn('CPU family: {[cpu family]}'.format(cpuinfo), output)
+        self.assertIn('CPU model: {[model]}'.format(cpuinfo), output)
+        self.assertIn('CPU stepping: {[stepping]}'.format(cpuinfo), output)
 
     def test_103_dotdot(self):
-        _, stderr = self.run_binary(['..Bootstrap'])
-        self.assertIn('User Program Started', stderr)
+        stdout, stderr = self.run_binary(['..Bootstrap'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('User Program Started', output)
 
     @unittest.skipUnless(HAS_SGX, 'this test requires SGX')
     def test_120_8gb_enclave(self):
@@ -124,17 +140,25 @@ class TC_01_Bootstrap(RegressionTestCase):
         self.assertIn('Memory Address Range OK', stderr)
 
     def test_130_large_number_of_items_in_manifest(self):
-        _, stderr = self.run_binary(['Bootstrap7'])
-        self.assertIn('key1=na', stderr)
-        self.assertIn('key1000=batman', stderr)
+        stdout, stderr = self.run_binary(['Bootstrap7'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('key1=na', output)
+        self.assertIn('key1000=batman', output)
 
     def test_140_missing_executable_and_manifest(self):
-        try:
-            _, stderr = self.run_binary(['fakenews'])
-            self.fail(
-                'expected non-zero returncode, stderr: {!r}'.format(stderr))
-        except subprocess.CalledProcessError:
-            pass
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['fakenews'])
+            # Guest reports the error and non-zero code on stdout; QEMU exits 0.
+            self.assertIn('Reading manifest failed', stdout)
+            m = re.search(r'VM exited with code (\d+)', stdout)
+            self.assertIsNotNone(m, 'did not find guest exit code in output')
+            self.assertNotEqual(int(m.group(1)), 0)
+        else:
+            try:
+                _, stderr = self.run_binary(['fakenews'])
+                self.fail('expected non-zero returncode, stderr: {!r}'.format(stderr))
+            except subprocess.CalledProcessError:
+                pass
 
 class TC_02_Symbols(RegressionTestCase):
     ALL_SYMBOLS = [
@@ -177,10 +201,11 @@ class TC_02_Symbols(RegressionTestCase):
         ALL_SYMBOLS.append('PalSegmentBaseSet')
 
     def test_000_symbols(self):
-        _, stderr = self.run_binary(['Symbols'])
+        stdout, stderr = self.run_binary(['Symbols'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
         prefix = 'symbol: '
         found_symbols = dict(line[len(prefix):].split(' = ')
-            for line in stderr.strip().split('\n') if line.startswith(prefix))
+            for line in output.strip().split('\n') if line.startswith(prefix))
         self.assertCountEqual(found_symbols, self.ALL_SYMBOLS)
         for k, value in found_symbols.items():
             value = ast.literal_eval(value)
@@ -231,8 +256,14 @@ class TC_10_Exception(RegressionTestCase):
 
 class TC_20_SingleProcess(RegressionTestCase):
     def test_000_exit_code(self):
-        with self.expect_returncode(112):
-            self.run_binary(['Exit'])
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['Exit'])
+            m = re.search(r'VM exited with code (\d+)', stdout)
+            self.assertIsNotNone(m, 'failed to parse VM exit code from output')
+            self.assertEqual(int(m.group(1)), 112)
+        else:
+            with self.expect_returncode(112):
+                self.run_binary(['Exit'])
 
     def test_100_file(self):
         try:
@@ -244,25 +275,26 @@ class TC_20_SingleProcess(RegressionTestCase):
         with open('File.manifest', 'rb') as file_:
             file_exist = file_.read()
 
-        _, stderr = self.run_binary(['File'])
+        stdout, stderr = self.run_binary(['File'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Basic File Opening
-        self.assertIn('File Open Test 1 OK', stderr)
-        self.assertIn('File Open Test 2 OK', stderr)
-        self.assertIn('File Open Test 3 OK', stderr)
+        self.assertIn('File Open Test 1 OK', output)
+        self.assertIn('File Open Test 2 OK', output)
+        self.assertIn('File Open Test 3 OK', output)
 
         # Basic File Creation
-        self.assertIn('File Creation Test 1 OK', stderr)
-        self.assertIn('File Creation Test 2 OK', stderr)
-        self.assertIn('File Creation Test 3 OK', stderr)
+        self.assertIn('File Creation Test 1 OK', output)
+        self.assertIn('File Creation Test 2 OK', output)
+        self.assertIn('File Creation Test 3 OK', output)
 
         # File Reading
         self.assertIn('Read Test 1 (0th - 40th): {}'.format(
-            file_exist[0:40].hex()), stderr)
+            file_exist[0:40].hex()), output)
         self.assertIn('Read Test 2 (0th - 40th): {}'.format(
-            file_exist[0:40].hex()), stderr)
+            file_exist[0:40].hex()), output)
         self.assertIn('Read Test 3 (200th - 240th): {}'.format(
-            file_exist[200:240].hex()), stderr)
+            file_exist[200:240].hex()), output)
 
         # File Writing
         with open('file_nonexist.tmp', 'rb') as file_:
@@ -272,20 +304,20 @@ class TC_20_SingleProcess(RegressionTestCase):
         self.assertEqual(file_exist[200:240], file_nonexist[0:40])
 
         # File Attribute Query
-        self.assertIn('Query: type = ', stderr)
-        self.assertIn(', size = {}'.format(len(file_exist)), stderr)
+        self.assertIn('Query: type = ', output)
+        self.assertIn(', size = {}'.format(len(file_exist)), output)
 
         # File Attribute Query by Handle
-        self.assertIn('Query by Handle: type = ', stderr)
-        self.assertIn(', size = {}'.format(len(file_exist)), stderr)
+        self.assertIn('Query by Handle: type = ', output)
+        self.assertIn(', size = {}'.format(len(file_exist)), output)
 
         # File Mapping
         self.assertIn(
             'Map Test 1 (0th - 40th): {}'.format(file_exist[0:40].hex()),
-            stderr)
+            output)
         self.assertIn(
             'Map Test 2 (200th - 240th): {}'.format(file_exist[200:240].hex()),
-            stderr)
+            output)
 
         # Set File Length
         self.assertEqual(
@@ -312,27 +344,28 @@ class TC_20_SingleProcess(RegressionTestCase):
             file_.touch()
         pathlib.Path('dir_delete.tmp').mkdir()
 
-        _, stderr = self.run_binary(['Directory'])
+        stdout, stderr = self.run_binary(['Directory'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Basic Directory Opening
-        self.assertIn('Directory Open Test 1 OK', stderr)
-        self.assertIn('Directory Open Test 2 OK', stderr)
-        self.assertIn('Directory Open Test 3 OK', stderr)
+        self.assertIn('Directory Open Test 1 OK', output)
+        self.assertIn('Directory Open Test 2 OK', output)
+        self.assertIn('Directory Open Test 3 OK', output)
 
         # Basic Directory Creation
-        self.assertIn('Directory Creation Test 1 OK', stderr)
-        self.assertIn('Directory Creation Test 2 OK', stderr)
-        self.assertIn('Directory Creation Test 3 OK', stderr)
+        self.assertIn('Directory Creation Test 1 OK', output)
+        self.assertIn('Directory Creation Test 2 OK', output)
+        self.assertIn('Directory Creation Test 3 OK', output)
 
         # Directory Reading
         for file_ in files:
-            self.assertIn('Read Directory: {}'.format(file_.name), stderr)
+            self.assertIn('Read Directory: {}'.format(file_.name), output)
 
         # Directory Attribute Query
-        self.assertIn('Query: type = ', stderr)
+        self.assertIn('Query: type = ', output)
 
         # Directory Attribute Query by Handle
-        self.assertIn('Query by Handle: type = ', stderr)
+        self.assertIn('Query by Handle: type = ', output)
 
         # Directory Deletion
         self.assertFalse(pathlib.Path('dir_delete.tmp').exists())
@@ -340,13 +373,15 @@ class TC_20_SingleProcess(RegressionTestCase):
         self.assertFalse(pathlib.Path('dir_rename_delete.tmp').exists())
 
     def test_200_event(self):
-        _, stderr = self.run_binary(['Event'])
-        self.assertIn('TEST OK', stderr)
+        stdout, stderr = self.run_binary(['Event'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('TEST OK', output)
 
     def test_300_memory(self):
         if not HAS_SGX or HAS_EDMM:
-            _, stderr = self.run_binary(['memory'])
-            self.assertIn('TEST OK', stderr)
+            stdout, stderr = self.run_binary(['memory'])
+            output = stdout if (HAS_TDX or HAS_VM) else stderr
+            self.assertIn('TEST OK', output)
         else:
             # SGX1 does not support unmapping a page or changing its permission after enclave init.
             # Therefore the memory protection and deallocation tests will fail.
@@ -359,76 +394,81 @@ class TC_20_SingleProcess(RegressionTestCase):
                 self.assertRegex(stderr, r'exec on RW mem at 0x[0-9a-f]+ unexpectedly succeeded')
 
     def test_400_pipe(self):
-        _, stderr = self.run_binary(['Pipe'])
+        stdout, stderr = self.run_binary(['Pipe'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Pipe Creation
-        self.assertIn('Pipe Creation 1 OK', stderr)
+        self.assertIn('Pipe Creation 1 OK', output)
 
         # Pipe Attributes
-        self.assertIn('Pipe Attribute Query 1 on pipesrv returned OK', stderr)
+        self.assertIn('Pipe Attribute Query 1 on pipesrv returned OK', output)
 
         # Pipe Connection
-        self.assertIn('Pipe Connection 1 OK', stderr)
+        self.assertIn('Pipe Connection 1 OK', output)
 
         # Pipe Transmission
-        self.assertIn('Pipe Write 1 OK', stderr)
-        self.assertIn('Pipe Read 1: Hello World 1', stderr)
-        self.assertIn('Pipe Write 2 OK', stderr)
-        self.assertIn('Pipe Read 2: Hello World 2', stderr)
+        self.assertIn('Pipe Write 1 OK', output)
+        self.assertIn('Pipe Read 1: Hello World 1', output)
+        self.assertIn('Pipe Write 2 OK', output)
+        self.assertIn('Pipe Read 2: Hello World 2', output)
 
     @unittest.skipUnless(ON_X86, "x86-specific")
     def test_500_thread(self):
-        _, stderr = self.run_binary(['Thread'])
+        stdout, stderr = self.run_binary(['Thread'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Thread Creation
-        self.assertIn('Child Thread Created', stderr)
-        self.assertIn('Run in Child Thread: Hello World', stderr)
+        self.assertIn('Child Thread Created', output)
+        self.assertIn('Run in Child Thread: Hello World', output)
 
         # Multiple Threads Run in Parallel
-        self.assertIn('Threads Run in Parallel OK', stderr)
+        self.assertIn('Threads Run in Parallel OK', output)
 
         # Set Thread Private Segment Register
-        self.assertIn('Private Message (FS Segment) 1: Hello World 1', stderr)
-        self.assertIn('Private Message (FS Segment) 2: Hello World 2', stderr)
+        self.assertIn('Private Message (FS Segment) 1: Hello World 1', output)
+        self.assertIn('Private Message (FS Segment) 2: Hello World 2', output)
 
         # Thread Exit
-        self.assertIn('Child Thread Exited', stderr)
+        self.assertIn('Child Thread Exited', output)
 
     def test_510_thread2(self):
-        _, stderr = self.run_binary(['Thread2'])
+        stdout, stderr = self.run_binary(['Thread2'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Thread Cleanup: Exit by return.
-        self.assertIn('Thread 2 ok.', stderr)
+        self.assertIn('Thread 2 ok.', output)
 
         # Thread Cleanup: Exit by PalThreadExit.
-        self.assertIn('Thread 3 ok.', stderr)
-        self.assertNotIn('Exiting thread 3 failed.', stderr)
+        self.assertIn('Thread 3 ok.', output)
+        self.assertNotIn('Exiting thread 3 failed.', output)
 
         # Thread Cleanup: Can still start threads.
-        self.assertIn('Thread 4 ok.', stderr)
+        self.assertIn('Thread 4 ok.', output)
 
     @unittest.skipUnless(HAS_SGX, 'This test is only meaningful on SGX PAL')
     def test_511_thread2_exitless(self):
-        _, stderr = self.run_binary(['Thread2_exitless'], timeout=60)
+        stdout, stderr = self.run_binary(['Thread2_exitless'], timeout=60)
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
 
         # Thread Cleanup: Exit by return.
-        self.assertIn('Thread 2 ok.', stderr)
+        self.assertIn('Thread 2 ok.', output)
 
         # Thread Cleanup: Exit by PalThreadExit.
-        self.assertIn('Thread 3 ok.', stderr)
-        self.assertNotIn('Exiting thread 3 failed.', stderr)
+        self.assertIn('Thread 3 ok.', output)
+        self.assertNotIn('Exiting thread 3 failed.', output)
 
         # Thread Cleanup: Can still start threads.
-        self.assertIn('Thread 4 ok.', stderr)
+        self.assertIn('Thread 4 ok.', output)
 
     @unittest.skipUnless(HAS_SGX, 'This test is only meaningful on SGX PAL')
     def test_512_thread2_edmm(self):
         if HAS_EDMM:
-            _, stderr = self.run_binary(['Thread2_edmm'])
-            self.assertIn('Thread 2 ok.', stderr)
-            self.assertIn('Thread 3 ok.', stderr)
-            self.assertNotIn('Exiting thread 3 failed.', stderr)
-            self.assertIn('Thread 4 ok.', stderr)
+            stdout, stderr = self.run_binary(['Thread2_edmm'])
+            output = stdout if (HAS_TDX or HAS_VM) else stderr
+            self.assertIn('Thread 2 ok.', output)
+            self.assertIn('Thread 3 ok.', output)
+            self.assertNotIn('Exiting thread 3 failed.', output)
+            self.assertIn('Thread 4 ok.', output)
         else:
             try:
                 self.run_binary(['Thread2_edmm'])
@@ -438,29 +478,32 @@ class TC_20_SingleProcess(RegressionTestCase):
                 self.assertIn("PalThreadCreate failed for thread 2.", stderr)
 
     def test_900_misc(self):
-        _, stderr = self.run_binary(['Misc'])
+        stdout, stderr = self.run_binary(['Misc'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
         # Query System Time
-        self.assertIn('Query System Time OK', stderr)
+        self.assertIn('Query System Time OK', output)
 
         # Delay Execution for 10000 Microseconds
-        self.assertIn('Delay Execution for 10000 Microseconds OK', stderr)
+        self.assertIn('Delay Execution for 10000 Microseconds OK', output)
 
         # Delay Execution for 3 Seconds
-        self.assertIn('Delay Execution for 3 Seconds OK', stderr)
+        self.assertIn('Delay Execution for 3 Seconds OK', output)
 
         # Generate Random Bits
-        self.assertIn('Generate Random Bits OK', stderr)
+        self.assertIn('Generate Random Bits OK', output)
 
     def test_910_hex(self):
-        _, stderr = self.run_binary(['Hex'])
+        stdout, stderr = self.run_binary(['Hex'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
         # Hex 2 String Helper Function
-        self.assertIn('Hex test 1 is deadbeef', stderr)
-        self.assertIn('Hex test 2 is cdcdcdcdcdcdcdcd', stderr)
+        self.assertIn('Hex test 1 is deadbeef', output)
+        self.assertIn('Hex test 2 is cdcdcdcdcdcdcdcd', output)
 
 class TC_21_ProcessCreation(RegressionTestCase):
     def test_100_process(self):
-        _, stderr = self.run_binary(['Process'], timeout=60)
-        counter = collections.Counter(stderr.split('\n'))
+        stdout, stderr = self.run_binary(['Process'], timeout=60)
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        counter = collections.Counter(output.split('\n'))
         # Process Creation
         self.assertEqual(counter['Child Process Created'], 3)
 
@@ -476,18 +519,21 @@ class TC_21_ProcessCreation(RegressionTestCase):
 
 class TC_23_SendHandle(RegressionTestCase):
     def test_000_send_handle(self):
-        _, stderr = self.run_binary(['send_handle'])
-        self.assertIn('Parent: test OK', stderr)
-        self.assertIn('Child: test OK', stderr)
+        stdout, stderr = self.run_binary(['send_handle'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('Parent: test OK', output)
+        self.assertIn('Child: test OK', output)
 
 class TC_30_IPParser(RegressionTestCase):
     def test_000_ipv4(self):
-        _, stderr = self.run_binary(['ipv4_parser'])
-        self.assertIn('TEST OK', stderr)
+        stdout, stderr = self.run_binary(['ipv4_parser'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('TEST OK', output)
 
     def test_010_ipv6(self):
-        _, stderr = self.run_binary(['ipv6_parser'])
-        self.assertIn('TEST OK', stderr)
+        stdout, stderr = self.run_binary(['ipv6_parser'])
+        output = stdout if (HAS_TDX or HAS_VM) else stderr
+        self.assertIn('TEST OK', output)
 
 @unittest.skipUnless(HAS_SGX, 'This test is only meaningful on SGX PAL')
 class TC_50_Attestation(RegressionTestCase):

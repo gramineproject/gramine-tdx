@@ -6,6 +6,7 @@ env.PYTHONPATH = python_platlib + ':' + env.WORKSPACE + '/scripts'
 // in Jenkins we can't write anything to $HOME, we must contain ourselves in $WORKSPACE
 env.XDG_CONFIG_HOME = env.WORKSPACE + '/XDG_CONFIG_HOME'
 env.CARGO_HOME = env.WORKSPACE + '/CARGO_HOME'
+env.HOME = env.WORKSPACE
 
 env.RA_TLS_ALLOW_OUTDATED_TCB_INSECURE = '1'
 env.RA_TLS_ALLOW_HW_CONFIG_NEEDED = '1'

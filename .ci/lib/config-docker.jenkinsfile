@@ -9,6 +9,10 @@ env.DOCKER_ARGS_SGX = '''
     --volume=/usr/src:/usr/src:ro
 '''
 
+env.DOCKER_ARGS_TDX = '''
+    --device=/dev/vhost-vsock:/dev/vhost-vsock
+'''
+
 if (fileExists('/dev/sgx_enclave')) {
     env.DOCKER_ARGS_SGX += ' --device=/dev/sgx_enclave:/dev/sgx_enclave'
 }
