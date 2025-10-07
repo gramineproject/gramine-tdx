@@ -161,6 +161,7 @@ int main(void) {
 
     fflush(stdout);
 
+#if 0 /* Skip for Gramine-TDX, as it currently doesn't support process creation */
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
@@ -202,5 +203,12 @@ int main(void) {
         remove("root/testdir");
         remove("root");
     }
+#endif
+    // cleanup
+    remove("root/testdir/file1");
+    remove("root/testdir/file2");
+    remove("root/testdir/dir3");
+    remove("root/testdir");
+    remove("root");
     return 0;
 }

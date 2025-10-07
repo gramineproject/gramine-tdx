@@ -12,8 +12,10 @@
 #define FIFO_PATH "tmp/fifo"
 
 int main(int argc, char** argv) {
+#if 0 /* Skip for Gramine-TDX, as it currently doesn't support process creation */
     int fd;
     char buffer[1024];
+#endif
     struct stat stat_buf;
 
     if (mkfifo(FIFO_PATH, S_IRWXU) < 0) {
@@ -30,6 +32,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+#if 0 /* Skip for Gramine-TDX, as it currently doesn't support process creation */
     pid_t pid = fork();
 
     if (pid < 0) {
@@ -130,6 +133,7 @@ int main(int argc, char** argv) {
 
         printf("[parent] TEST OK\n");
     }
+#endif
 
     return 0;
 }

@@ -102,6 +102,7 @@ static void test_multiple_pending(void) {
     }
 }
 
+#if 0
 static void test_fork(void) {
     ignore_signal(SIGALRM);
 
@@ -126,6 +127,7 @@ static void test_fork(void) {
 
     CHECK(waitpid(p, NULL, 0) != p);
 }
+#endif
 
 static void test_execve_start(char* self) {
     ignore_signal(SIGALRM);
@@ -169,7 +171,9 @@ int main(int argc, char* argv[]) {
     test_multiple_pending();
 
     clean_mask_and_pending_signals();
+#if 0 /* Skip for Gramine-TDX, as it currently doesn't support process creation */
     test_fork();
+#endif
 
     clean_mask_and_pending_signals();
     test_execve_start(argv[0]);

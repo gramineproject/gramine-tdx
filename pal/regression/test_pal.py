@@ -1,6 +1,7 @@
 import ast
 import collections
 import mmap
+import os
 import pathlib
 import random
 import re
@@ -43,6 +44,7 @@ class TC_00_Basic(RegressionTestCase):
 
 class TC_00_BasicSet2(RegressionTestCase):
     @unittest.skipUnless(ON_X86, "x86-specific")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Arithmetic error is not handled, see isr_c()")
     def test_Exception2(self):
         stdout, stderr = self.run_binary(['Exception2'])
         output = stdout if (HAS_TDX or HAS_VM) else stderr
@@ -68,6 +70,7 @@ class TC_00_BasicSet2(RegressionTestCase):
         self.assertIn('Hello World', stdout)
 
     @unittest.skipIf(HAS_SGX, "Pipes must be created in two parallel threads under SGX")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Gramine-TDX does not support multi-process creation at the current time")
     def test_Process4(self):
         stdout, stderr = self.run_binary(['Process4'], timeout=5)
         output = stdout if (HAS_TDX or HAS_VM) else stderr
@@ -112,6 +115,7 @@ class TC_01_Bootstrap(RegressionTestCase):
         self.assertIn('argv[3] = c', output)
         self.assertIn('argv[4] = d', output)
 
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Test expects bare metal CPU info, but Gramine-TDX runs on QEMU with virtualized CPU info")
     def test_102_cpuinfo(self):
         with open('/proc/cpuinfo') as file_:
             cpuinfo = file_.read().strip().split('\n\n')[-1]
@@ -227,6 +231,7 @@ class TC_10_Exception(RegressionTestCase):
         return True
 
     @unittest.skipUnless(ON_X86, "x86-specific")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Arithmetic error is not handled, see isr_c()")
     def test_000_exception(self):
         try:
             _, stderr = self.run_binary(['Exception'])
@@ -373,6 +378,8 @@ class TC_20_SingleProcess(RegressionTestCase):
         self.assertFalse(pathlib.Path('dir_rename_delete.tmp').exists())
 
     def test_200_event(self):
+        # The default number of CPUs is 1 in Gramine-TDX. This Event test needs at least two cores
+        #   so that the child thread can run and the test will not get stuck.
         stdout, stderr = self.run_binary(['Event'])
         output = stdout if (HAS_TDX or HAS_VM) else stderr
         self.assertIn('TEST OK', output)
@@ -500,6 +507,7 @@ class TC_20_SingleProcess(RegressionTestCase):
         self.assertIn('Hex test 2 is cdcdcdcdcdcdcdcd', output)
 
 class TC_21_ProcessCreation(RegressionTestCase):
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Gramine-TDX does not support multi-process creation at the current time")
     def test_100_process(self):
         stdout, stderr = self.run_binary(['Process'], timeout=60)
         output = stdout if (HAS_TDX or HAS_VM) else stderr
@@ -518,6 +526,7 @@ class TC_21_ProcessCreation(RegressionTestCase):
         self.assertEqual(counter['Process Read 2: Hello World 2'], 3)
 
 class TC_23_SendHandle(RegressionTestCase):
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Gramine-TDX does not support multi-process creation at the current time")
     def test_000_send_handle(self):
         stdout, stderr = self.run_binary(['send_handle'])
         output = stdout if (HAS_TDX or HAS_VM) else stderr

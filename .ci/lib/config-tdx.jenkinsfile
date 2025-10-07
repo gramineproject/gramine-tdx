@@ -1,0 +1,2 @@
+// The default number of vCPU is 1, but some tests require more than one vCPU to work.
+env.GRAMINE_CPU_NUM = 4

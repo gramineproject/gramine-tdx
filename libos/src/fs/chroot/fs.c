@@ -88,8 +88,11 @@ static int chroot_lookup(struct libos_dentry* dent) {
             type = S_IFDIR;
             break;
         case PAL_TYPE_DEV:
-            type = S_IFCHR;
-            break;
+            log_warning("trying to access '%s' which is a device; "
+                        "Gramine-TDX currently supports only regular files and dirs",
+                        uri);
+            ret = -EACCES;
+            goto out;
         case PAL_TYPE_PIPE:
             log_warning("trying to access '%s' which is a host-level FIFO (named pipe); "
                         "Gramine supports only named pipes created by Gramine processes",

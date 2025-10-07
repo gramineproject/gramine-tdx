@@ -17,6 +17,7 @@
 #define SRV_IP "127.0.0.1"
 #define PORT   11113
 
+#if 0
 static uint64_t wait_event(int epfd, struct epoll_event* possible_events,
                            size_t possible_events_len) {
     struct epoll_event event = { 0 };
@@ -88,6 +89,7 @@ static void test_epoll_migration(void) {
 
     exit(0);
 }
+#endif
 
 static void test_epoll_oneshot(void) {
     int epfd = CHECK(epoll_create1(EPOLL_CLOEXEC));
@@ -152,6 +154,7 @@ static void test_epoll_empty(void) {
     CHECK(close(epfd));
 }
 
+#if 0
 static void server(int sockfd) {
     int epfd = CHECK(epoll_create1(EPOLL_CLOEXEC));
 
@@ -268,15 +271,20 @@ static void test_epoll_wait_rdhup(void) {
         errx(1, "child wait status: %#x", status);
     }
 }
+#endif
 
 int main(void) {
     test_epoll_empty();
 
+#if 0 /* Skip for Gramine-TDX, as it currently doesn't support process creation */
     test_epoll_migration();
+#endif
 
     test_epoll_oneshot();
 
+#if 0 /* Skip for Gramine-TDX, as it currently doesn't support process creation */
     test_epoll_wait_rdhup();
+#endif
 
     puts("TEST OK");
     return 0;

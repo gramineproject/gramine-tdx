@@ -607,9 +607,10 @@ int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags, uint64_
         return -PAL_ERROR_DENIED;
 
     /* we currently support only regular files and dirs */
+    /*
     if (!S_ISREG(attr_out.attr.mode) && !S_ISDIR(attr_out.attr.mode))
         return -PAL_ERROR_DENIED;
-
+    */
     /* NOTE: we don't cache file attrs and thus don't care about `attr_valid` fields */
     *out_attr = attr_out.attr;
     return 0;
