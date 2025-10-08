@@ -407,13 +407,18 @@ class RegressionTestCase(unittest.TestCase):
             gramine_args += ' ' + ' '.join(rest)
         gramine_args += ' -gramine-args-end'
 
-        def get_envs():
-            env_str = ''
-            for name, value in os.environ.items():
-                env_str += ('\"{0}={1}\" '.format(name, value).replace(',', ',,'))
-            return env_str
+        def get_envs(env):
+            # Build -gramine-envs payload from a provided mapping (no os.environ)
+            # to prevent malformed env vars in CI from causing build_envs() to fail.
+            if not env:
+                return ""
+            parts = []
+            for name, value in env.items():
+                v = str(value).replace(',', ',,')
+                parts.append(f'"{name}={v}"')
+            return " ".join(parts)
 
-        gramine_envs = '-gramine-envs ' + get_envs() + ' -gramine-envs-end'
+        gramine_envs = '-gramine-envs ' + get_envs(env) + ' -gramine-envs-end'
 
         if prefix is None:
             prefix = []
