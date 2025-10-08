@@ -146,19 +146,8 @@ class TC_01_Bootstrap(RegressionTestCase):
         }
         manifest_envs = {'LD_LIBRARY_PATH': '/lib'}
 
-        if HAS_VM or HAS_TDX:
-            # Gramine-TDX: guest env is built from os.environ via fw_cfg.
-            # It will include many more vars than just host_envs, so we skip the exact count check.
-            old_env = os.environ.copy()
-            try:
-                os.environ.update(host_envs)
-                stdout, _ = self.run_binary(['env_from_host'])
-            finally:
-                os.environ.clear()
-                os.environ.update(old_env)
-        else:
-            stdout, _ = self.run_binary(['env_from_host'], env=host_envs)
-            self.assertIn('# of envs: %d\n' % (len(host_envs) + len(manifest_envs)), stdout)
+        stdout, _ = self.run_binary(['env_from_host'], env=host_envs)
+        self.assertIn('# of envs: %d\n' % (len(host_envs) + len(manifest_envs)), stdout)
         for _, (key, val) in enumerate({**host_envs, **manifest_envs}.items()):
             # We don't enforce any specific order of envs, so we skip checking the index.
             self.assertIn('] = %s\n' % (key + '=' + val), stdout)
@@ -189,17 +178,7 @@ class TC_01_Bootstrap(RegressionTestCase):
         }
         manifest_envs = {'LD_LIBRARY_PATH': '/lib'}
 
-        if HAS_VM or HAS_TDX:
-            # Gramine-TDX: guest env is built from os.environ via fw_cfg.
-            old_env = os.environ.copy()
-            try:
-                os.environ.update(host_envs)
-                stdout, _ = self.run_binary(['env_passthrough'])
-            finally:
-                os.environ.clear()
-                os.environ.update(old_env)
-        else:
-            stdout, _ = self.run_binary(['env_passthrough'], env=host_envs)
+        stdout, _ = self.run_binary(['env_passthrough'], env=host_envs)
         self.assertIn('# of envs: %d\n' % (len(host_envs) - 2 + len(manifest_envs)), stdout)
 
         # We don't enforce any specific order of envs, so we skip checking the index.

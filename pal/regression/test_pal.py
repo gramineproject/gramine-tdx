@@ -143,8 +143,6 @@ class TC_01_Bootstrap(RegressionTestCase):
         _, stderr = self.run_binary(['Bootstrap6'], timeout=360)
         self.assertIn('Memory Address Range OK', stderr)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM, "Gramine-TDX forwards host environment variables into the VM. In CI setups," \
-                                        "malformed entries may be present and cause build_envs() to fail.")
     def test_130_large_number_of_items_in_manifest(self):
         stdout, stderr = self.run_binary(['Bootstrap7'])
         output = stdout if (HAS_TDX or HAS_VM) else stderr

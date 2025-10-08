@@ -281,7 +281,7 @@ class RegressionTestCase(unittest.TestCase):
         return self.run_binary(args, prefix=prefix, env=env, **kwds)
 
     # mirror gramine-vm.in
-    def run_vm(self, args, *, timeout=None, prefix=None, run_gdb=False, **kwds):
+    def run_vm(self, args, *, timeout=None, prefix=None, run_gdb=False, env=None, **kwds):
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
                    else self.DEFAULT_TIMEOUT)
 
@@ -469,10 +469,10 @@ class RegressionTestCase(unittest.TestCase):
             cleanup_vm(gramine_vm_id)
         return stdout, stderr
 
-    def run_binary(self, args, *, timeout=None, prefix=None, **kwds):
+    def run_binary(self, args, *, timeout=None, prefix=None, env=None, **kwds):
         # VM/TDX path (QEMU)
         if HAS_VM or HAS_TDX:
-            return self.run_vm(args, timeout=timeout, prefix=prefix, run_gdb=False, **kwds)
+            return self.run_vm(args, timeout=timeout, prefix=prefix, run_gdb=False, env=env, **kwds)
 
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
             else self.DEFAULT_TIMEOUT)
