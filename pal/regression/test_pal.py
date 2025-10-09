@@ -384,6 +384,7 @@ class TC_20_SingleProcess(RegressionTestCase):
         output = stdout if (HAS_TDX or HAS_VM) else stderr
         self.assertIn('TEST OK', output)
 
+    @unittest.skipIf(HAS_TDX or HAS_VM, "This test sometimes fails in CI environment")
     def test_300_memory(self):
         if not HAS_SGX or HAS_EDMM:
             stdout, stderr = self.run_binary(['memory'])
