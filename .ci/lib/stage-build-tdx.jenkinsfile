@@ -63,7 +63,7 @@ stage('build') {
                 --buildtype="$BUILDTYPE" \
                 -Ddirect=disabled \
                 -Dsgx=enabled \
-                -Dvm=enabled \
+                -Dvm=disabled \
                 -Dtdx=enabled \
                 -Dtests=enabled \
                 $MESON_OPTIONS
