@@ -1609,12 +1609,12 @@ class TC_80_Socket(RegressionTestCase):
 
     # Two tests for a responsive peer: first connect() returns EINPROGRESS, then poll/epoll
     # immediately returns because the connection is quickly refused
-    @unittest.skipIf(HAS_TDX or HAS_VM, "Returned EINPROGRESS")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "VM PALs do not currently emulate EINPROGRESS. See pal_common_socket_connect().")
     def test_305_socket_tcp_einprogress_responsive_poll(self):
         stdout, _ = self.run_binary(['tcp_einprogress', '127.0.0.1', 'poll'])
         self.assertIn('TEST OK (connection refused after initial EINPROGRESS)', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM, "Returned EINPROGRESS")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "VM PALs do not currently emulate EINPROGRESS. See pal_common_socket_connect().")
     def test_306_socket_tcp_einprogress_responsive_epoll(self):
         stdout, _ = self.run_binary(['tcp_einprogress', '127.0.0.1', 'epoll'])
         self.assertIn('TEST OK (connection refused after initial EINPROGRESS)', stdout)
@@ -1623,17 +1623,16 @@ class TC_80_Socket(RegressionTestCase):
     # out because the connection cannot be established. Note that 203.0.113.1 address is taken from
     # the reserved "Documentation" range 203.0.113.0/24 (TEST-NET-3), which should never be used in
     # real networks.
-    @unittest.skipIf(HAS_TDX or HAS_VM, "Returned EINPROGRESS")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "VM PALs do not currently emulate EINPROGRESS. See pal_common_socket_connect().")
     def test_307_socket_tcp_einprogress_unresponsive_poll(self):
         stdout, _ = self.run_binary(['tcp_einprogress', '203.0.113.1', 'poll'])
         self.assertIn('TEST OK (connection timed out)', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM, "Returned EINPROGRESS")
+    @unittest.skipIf(HAS_TDX or HAS_VM, "VM PALs do not currently emulate EINPROGRESS. See pal_common_socket_connect().")
     def test_308_socket_tcp_einprogress_unresponsive_epoll(self):
         stdout, _ = self.run_binary(['tcp_einprogress', '203.0.113.1', 'epoll'])
         self.assertIn('TEST OK (connection timed out)', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM, "Returned EINPROGRESS")
     def test_310_socket_tcp_ipv6_v6only(self):
         stdout, _ = self.run_binary(['tcp_ipv6_v6only'], timeout=50)
         self.assertIn('test completed successfully', stdout)
