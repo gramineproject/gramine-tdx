@@ -420,6 +420,7 @@ class TC_01_Bootstrap(RegressionTestCase):
             m = re.search(r'VM exited with code (\d+)', stdout)
             self.assertIsNotNone(m, 'Could not find "VM exited with code <n>" in output')
             rc = int(m.group(1))
+            self.assertNotEqual(rc, 0, 'expected returncode != 0')
             self.assertNotEqual(rc, 42, 'expected returncode != 42')
         else:
             try:
@@ -428,13 +429,21 @@ class TC_01_Bootstrap(RegressionTestCase):
             except subprocess.CalledProcessError as e:
                 self.assertNotEqual(e.returncode, 42, 'expected returncode != 42')
 
-    @unittest.skipUnless(HAS_SGX, 'This test relies on SGX-specific manifest options.')
+    @unittest.skipUnless(HAS_SGX or HAS_TDX, 'This test relies on SGX/TDX-specific manifest options.')
     def test_501_init_fail2(self):
-        try:
-            self.run_binary(['init_fail2'], timeout=60)
-            self.fail('expected to return nonzero (and != 42)')
-        except subprocess.CalledProcessError as e:
-            self.assertNotEqual(e.returncode, 42, 'expected returncode != 42')
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['init_fail2'], timeout=60)
+            m = re.search(r'VM exited with code (\d+)', stdout)
+            self.assertIsNotNone(m, 'Could not find "VM exited with code <n>" in output')
+            rc = int(m.group(1))
+            self.assertNotEqual(rc, 0, 'expected returncode != 0')
+            self.assertNotEqual(rc, 42, 'expected returncode != 42')
+        else:
+            try:
+                self.run_binary(['init_fail2'], timeout=60)
+                self.fail('expected to return nonzero (and != 42)')
+            except subprocess.CalledProcessError as e:
+                self.assertNotEqual(e.returncode, 42, 'expected returncode != 42')
 
     def test_600_multi_pthread(self):
         stdout, _ = self.run_binary(['multi_pthread'])
