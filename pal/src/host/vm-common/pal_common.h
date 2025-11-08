@@ -55,8 +55,6 @@ int64_t pal_common_file_write(struct pal_handle* handle, uint64_t offset, uint64
                               const void* buffer);
 void pal_common_file_destroy(struct pal_handle* handle);
 int pal_common_file_delete(struct pal_handle* handle, enum pal_delete_mode delete_mode);
-int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t prot,
-                        uint64_t offset, uint64_t size);
 int pal_common_file_setlength(struct pal_handle* handle, uint64_t length);
 int pal_common_file_flush(struct pal_handle* handle);
 int pal_common_file_attrquerybyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* pal_attr);
