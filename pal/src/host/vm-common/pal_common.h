@@ -23,8 +23,6 @@ struct pal_tcb_vm {
     };
 };
 
-extern bool g_use_trusted_files;
-
 extern spinlock_t g_connecting_pipes_lock;
 extern LISTP_TYPE(pal_handle) g_server_pipes_list;
 extern LISTP_TYPE(pal_handle) g_connecting_pipes_list;

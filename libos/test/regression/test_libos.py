@@ -500,72 +500,93 @@ class TC_03_FileCheckPolicy(RegressionTestCase):
         stdout, stderr = self.run_binary(['file_check_policy_strict', 'read', 'trusted_testfile'])
         self.assertIn('file_check_policy succeeded', stdout)
 
-        # verify that Gramine-SGX does not print a warning on file_check_policy = "strict"
-        if HAS_SGX:
-            self.assertIn('Gramine detected the following insecure configurations', stderr)
-            self.assertNotIn('- sgx.file_check_policy = ', stderr)
+        # verify that Gramine-SGX/TDX does not print a warning on file_check_policy = "strict"
+        if HAS_SGX or HAS_TDX:
+            self.assertIn('Gramine detected the following insecure configurations', stdout if HAS_TDX or HAS_VM else stderr)
+            self.assertNotIn('- sgx.file_check_policy = ', stdout if HAS_TDX or HAS_VM else stderr)
 
     def test_001_strict_fail(self):
-        try:
-            self.run_binary(['file_check_policy_strict', 'read', 'unknown_testfile'])
-            self.fail('expected to return nonzero')
-        except subprocess.CalledProcessError as e:
-            self.assertEqual(e.returncode, 2)
-            stderr = e.stderr.decode()
-            self.assertIn('Disallowing access to file \'unknown_testfile\'', stderr)
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['file_check_policy_strict', 'read', 'unknown_testfile'])
+            self.assertIn('VM exited with code 2', stdout)
+            self.assertIn('Disallowing access to file \'unknown_testfile\'', stdout)
+        else:
+            try:
+                self.run_binary(['file_check_policy_strict', 'read', 'unknown_testfile'])
+                self.fail('expected to return nonzero')
+            except subprocess.CalledProcessError as e:
+                self.assertEqual(e.returncode, 2)
+                stderr = e.stderr.decode()
+                self.assertIn('Disallowing access to file \'unknown_testfile\'', stderr)
 
     def test_002_strict_fail_create(self):
         if os.path.exists('nonexisting_testfile'):
             os.remove('nonexisting_testfile')
-        try:
-            # this tests a previous bug in Gramine that allowed creating unknown files
-            self.run_binary(['file_check_policy_strict', 'append', 'nonexisting_testfile'])
-            self.fail('expected to return nonzero')
-        except subprocess.CalledProcessError as e:
-            self.assertEqual(e.returncode, 2)
-            stderr = e.stderr.decode()
-            self.assertIn('Disallowing creating file \'./nonexisting_testfile\'', stderr)
-            if os.path.exists('nonexisting_testfile'):
-                self.fail('test created a file unexpectedly')
+        # this tests a previous bug in Gramine that allowed creating unknown files
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['file_check_policy_strict', 'append', 'nonexisting_testfile'])
+            self.assertIn('VM exited with code 2', stdout)
+            self.assertIn('Disallowing creating file \'./nonexisting_testfile\'', stdout)
+        else:
+            try:
+                self.run_binary(['file_check_policy_strict', 'append', 'nonexisting_testfile'])
+                self.fail('expected to return nonzero')
+            except subprocess.CalledProcessError as e:
+                self.assertEqual(e.returncode, 2)
+                stderr = e.stderr.decode()
+                self.assertIn('Disallowing creating file \'./nonexisting_testfile\'', stderr)
+
+        if os.path.exists('nonexisting_testfile'):
+            self.fail('test created a file unexpectedly')
 
     def test_003_strict_fail_write(self):
-        try:
-            # writing to trusted files should not be possible
-            self.run_binary(['file_check_policy_strict', 'write', 'trusted_testfile'])
-            self.fail('expected to return nonzero')
-        except subprocess.CalledProcessError as e:
-            self.assertEqual(e.returncode, 2)
-            stderr = e.stderr.decode()
-            self.assertIn('Disallowing write/append to a trusted file \'trusted_testfile\'', stderr)
+        # writing to trusted files should not be possible
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['file_check_policy_strict', 'write', 'trusted_testfile'])
+            self.assertIn('VM exited with code 2', stdout)
+            self.assertIn('Disallowing write/append to a trusted file \'trusted_testfile\'', stdout)
+        else:
+            try:
+                self.run_binary(['file_check_policy_strict', 'write', 'trusted_testfile'])
+                self.fail('expected to return nonzero')
+            except subprocess.CalledProcessError as e:
+                self.assertEqual(e.returncode, 2)
+                stderr = e.stderr.decode()
+                self.assertIn('Disallowing write/append to a trusted file \'trusted_testfile\'', stderr)
 
     def test_004_allow_all_but_log_unknown(self):
         stdout, stderr = self.run_binary(['file_check_policy_allow_all_but_log', 'read',
                                           'unknown_testfile'])
         self.assertIn('Allowing access to unknown file \'unknown_testfile\' due to '
-                      'file_check_policy', stderr)
+                      'file_check_policy', stdout if HAS_TDX or HAS_VM else stderr)
         self.assertIn('file_check_policy succeeded', stdout)
 
-        # verify that Gramine-SGX prints a warning on file_check_policy = "allow_all_bug_log"
-        if HAS_SGX:
-            self.assertIn('Gramine detected the following insecure configurations', stderr)
-            self.assertIn('- sgx.file_check_policy = allow_all_but_log', stderr)
+        # verify that Gramine-SGX/TDX prints a warning on file_check_policy = "allow_all_bug_log"
+        if HAS_SGX or HAS_TDX:
+            self.assertIn('Gramine detected the following insecure configurations', stdout if HAS_TDX or HAS_VM else stderr)
+            self.assertIn('- sgx.file_check_policy = allow_all_but_log', stdout if HAS_TDX or HAS_VM else stderr)
 
     def test_005_allow_all_but_log_trusted(self):
         stdout, stderr = self.run_binary(['file_check_policy_allow_all_but_log', 'read',
                                           'trusted_testfile'])
         self.assertNotIn('Allowing access to unknown file \'trusted_testfile\' due to '
-                         'file_check_policy settings.', stderr)
+                         'file_check_policy settings.', stdout if HAS_TDX or HAS_VM else stderr)
         self.assertIn('file_check_policy succeeded', stdout)
 
     def test_006_allow_all_but_log_trusted_create_fail(self):
-        try:
-            # this fails because modifying trusted files is prohibited
-            self.run_binary(['file_check_policy_allow_all_but_log', 'append', 'trusted_testfile'])
-            self.fail('expected to return nonzero')
-        except subprocess.CalledProcessError as e:
-            self.assertEqual(e.returncode, 2)
-            stderr = e.stderr.decode()
-            self.assertIn('Disallowing write/append to a trusted file \'trusted_testfile\'', stderr)
+        # this fails because modifying trusted files is prohibited
+        if HAS_TDX or HAS_VM:
+            stdout, _ = self.run_binary(['file_check_policy_allow_all_but_log', 'append', 'trusted_testfile'])
+            self.assertIn('VM exited with code 2', stdout)
+            self.assertIn('Disallowing write/append to a trusted file \'trusted_testfile\'', stdout)
+        else:
+            try:
+                self.run_binary(['file_check_policy_allow_all_but_log', 'append', 'trusted_testfile'])
+                self.fail('expected to return nonzero')
+            except subprocess.CalledProcessError as e:
+                self.assertEqual(e.returncode, 2)
+                stderr = e.stderr.decode()
+                self.assertIn('Disallowing write/append to a trusted file \'trusted_testfile\'', stderr)
 
     def test_007_allow_all_but_log_unknown_create(self):
         if os.path.exists('nonexisting_testfile'):
@@ -574,7 +595,7 @@ class TC_03_FileCheckPolicy(RegressionTestCase):
             stdout, stderr = self.run_binary(['file_check_policy_allow_all_but_log', 'append',
                                               'nonexisting_testfile'])
             self.assertIn('Allowing creating unknown file \'./nonexisting_testfile\' due to '
-                          'file_check_policy', stderr)
+                          'file_check_policy', stdout if HAS_TDX or HAS_VM else stderr)
             self.assertIn('file_check_policy succeeded', stdout)
             if not os.path.exists('nonexisting_testfile'):
                 self.fail('test did not create a file')
@@ -1192,8 +1213,8 @@ class TC_40_FileSystem(RegressionTestCase):
         stdout, stderr = self.run_binary(['device_passthrough'])
         self.assertIn('TEST OK', stdout)
 
-        # verify that Gramine-SGX prints a warning on allowed_files (test uses /dev/zero)
-        if HAS_SGX:
+        # verify that Gramine-SGX/TDX prints a warning on allowed_files (test uses /dev/zero)
+        if HAS_SGX or HAS_TDX:
             self.assertIn('Gramine detected the following insecure configurations', stderr)
             self.assertIn('- sgx.allowed_files = [ ... ]', stderr)
 
