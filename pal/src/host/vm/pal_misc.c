@@ -66,6 +66,12 @@ int _PalGetSpecialKey(const char* name, void* key, size_t* key_size) {
     return PAL_ERROR_NOTIMPLEMENTED;
 }
 
+int _PalValidateEntrypoint(const void* buf, size_t size) {
+    __UNUSED(buf);
+    __UNUSED(size);
+    return 0; /* no need to validate entrypoint; this PAL doesn't provide security */
+}
+
 void _PalGetLazyCommitPages(uintptr_t addr, size_t size, uint8_t* bitvector) {
     __UNUSED(addr);
     assert(size && IS_ALIGNED(size, PAGE_SIZE));

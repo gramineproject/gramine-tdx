@@ -6,6 +6,8 @@
  */
 
 #include "api.h"
+#include "crypto.h"
+#include "hex.h"
 #include "pal.h"
 #include "pal_common.h"
 #include "pal_error.h"
@@ -16,6 +18,7 @@
 #include "kernel_time.h"
 #include "tdx_arch.h"
 #include "tdx_quote.h"
+#include "toml_utils.h"
 #include "vm_callbacks.h"
 
 /* target_info is not used/defined in TDX, but for uniformity with SGX and to satisfy current LibOS
@@ -278,6 +281,61 @@ int _PalGetSpecialKey(const char* name, void* key, size_t* key_size) {
     __UNUSED(key);
     __UNUSED(key_size);
     return -PAL_ERROR_NOTIMPLEMENTED;
+}
+
+int _PalValidateEntrypoint(const void* buf, size_t size) {
+    int ret;
+    uint8_t manifest_sha256_bytes[32];
+    uint8_t computed_sha256_bytes[32];
+
+    char* entrypoint_sha256_str = NULL;
+    ret = toml_string_in(g_pal_public_state.manifest_root, "loader.entrypoint.sha256",
+                         &entrypoint_sha256_str);
+    if (ret < 0) {
+        log_error("Cannot parse 'loader.entrypoint.sha256' from manifest");
+        return PAL_ERROR_INVAL;
+    }
+
+    if (!entrypoint_sha256_str) {
+        log_error("Cannot find 'loader.entrypoint.sha256' in manifest");
+        return PAL_ERROR_INVAL;
+    }
+
+    if (strlen(entrypoint_sha256_str) != sizeof(manifest_sha256_bytes) * 2) {
+        log_error("Hash in 'loader.entrypoint.sha256' is not a SHA256 hash");
+        ret = PAL_ERROR_INVAL;
+        goto out;
+    }
+
+    char* bytes = hex2bytes(entrypoint_sha256_str, strlen(entrypoint_sha256_str),
+                            manifest_sha256_bytes, sizeof(manifest_sha256_bytes));
+    if (!bytes) {
+        log_error("Could not parse hash in 'loader.entrypoint.sha256'");
+        ret = PAL_ERROR_INVAL;
+        goto out;
+    }
+
+    LIB_SHA256_CONTEXT entrypoint_sha;
+    ret = lib_SHA256Init(&entrypoint_sha);
+    if (ret < 0)
+        goto out;
+    ret = lib_SHA256Update(&entrypoint_sha, buf, size);
+    if (ret < 0)
+        goto out;
+    ret = lib_SHA256Final(&entrypoint_sha, computed_sha256_bytes);
+    if (ret < 0)
+        goto out;
+
+    if (memcmp(computed_sha256_bytes, manifest_sha256_bytes, sizeof(computed_sha256_bytes))) {
+        log_error("Hash of entrypoint does not match with the reference hash in manifest");
+        ret = PAL_ERROR_DENIED;
+        goto out;
+    }
+
+    ret = 0;
+out:
+    free(entrypoint_sha256_str);
+    return ret;
 }
 
 void _PalGetLazyCommitPages(uintptr_t addr, size_t size, uint8_t* bitvector) {
