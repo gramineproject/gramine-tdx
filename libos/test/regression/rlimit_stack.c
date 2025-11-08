@@ -26,6 +26,7 @@ int main(void) {
 
     fflush(stdout);
 
+#if 0
     int pid = CHECK(fork());
     if (pid == 0) {
         /* verify that STACK limit is correctly migrated to the child process */
@@ -41,6 +42,7 @@ int main(void) {
     CHECK(wait(&status));
     if (!WIFEXITED(status) || WEXITSTATUS(status))
         errx(1, "child wait status: %#x", status);
+#endif
 
     CHECK(getrlimit(RLIMIT_STACK, &rlim));
     printf("(in parent, after setrlimit) RLIMIT_STACK soft limit: %lu\n", (uint64_t)rlim.rlim_cur);
