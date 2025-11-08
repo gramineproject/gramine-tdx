@@ -866,6 +866,7 @@ class TC_30_Syscall(RegressionTestCase):
 
     @unittest.skipIf(HAS_SGX and not HAS_EDMM,
         'On SGX without EDMM, SIGBUS cannot be triggered for lack of dynamic memory protection.')
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Gramine-TDX does not support multi-process creation at the current time")
     def test_051_mmap_file_sigbus_child(self):
         read_path, write_path = self._prepare_mmap_file_sigbus_files()
         stdout, _ = self.run_binary(['mmap_file_sigbus', read_path, write_path, 'fork'], timeout=60)
@@ -873,6 +874,7 @@ class TC_30_Syscall(RegressionTestCase):
         self.assertIn('CHILD OK', stdout)
         self.assertIn('TEST OK', stdout)
 
+    @unittest.skipIf(HAS_TDX or HAS_VM, "Gramine-TDX does not support multi-process creation at the current time")
     def test_052_mmap_file_backed_trusted(self):
         stdout, _ = self.run_binary(['mmap_file_backed', 'mmap_file_backed'], timeout=60)
         self.assertIn('Child process done', stdout)
