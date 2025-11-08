@@ -11,7 +11,7 @@ fs.mounts = [
   { path = "/{{ entrypoint }}", uri = "file:{{ binary_dir }}/{{ entrypoint }}" },
 ]
 
-sgx.enclave_size = "4G"
+sgx.enclave_size = "8G"
 sgx.max_threads = {{ '1' if env.get('EDMM', '0') == '1' else '20' }}
 sgx.debug = true
 sgx.edmm_enable = {{ 'true' if env.get('EDMM', '0') == '1' else 'false' }}

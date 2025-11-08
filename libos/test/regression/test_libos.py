@@ -950,7 +950,7 @@ class TC_30_Syscall(RegressionTestCase):
         finally:
             if os.path.exists('testfile_map_noreserve'):
                 os.remove('testfile_map_noreserve')
-        if not HAS_SGX or HAS_EDMM:
+        if (not HAS_SGX or HAS_EDMM) and not (HAS_TDX or HAS_VM):
             self.assertIn('write to R mem got SIGSEGV', stdout)
 
     def test_060_sigaltstack(self):

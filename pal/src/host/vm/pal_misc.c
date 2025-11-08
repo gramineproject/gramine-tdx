@@ -63,5 +63,23 @@ int _PalGetSpecialKey(const char* name, void* key, size_t* key_size) {
     __UNUSED(name);
     __UNUSED(key);
     __UNUSED(key_size);
-    return -PAL_ERROR_NOTIMPLEMENTED;
+    return PAL_ERROR_NOTIMPLEMENTED;
+}
+
+void _PalGetLazyCommitPages(uintptr_t addr, size_t size, uint8_t* bitvector) {
+    __UNUSED(addr);
+    assert(size && IS_ALIGNED(size, PAGE_SIZE));
+    assert(bitvector);
+
+    size_t bitvector_size = UDIV_ROUND_UP(size / g_page_size, 8);
+
+    memset(bitvector, 0, bitvector_size);
+}
+
+int _PalFreeThenLazyReallocCommittedPages(void* addr, uint64_t size) {
+    assert(IS_ALIGNED_PTR(addr, PAGE_SIZE));
+    assert(size && IS_ALIGNED(size, PAGE_SIZE));
+
+    memset(addr, 0, size);
+    return 0;
 }

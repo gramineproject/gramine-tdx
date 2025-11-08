@@ -44,6 +44,8 @@ static struct pal_handle* g_first_thread_handle = NULL;
 
 static uint64_t g_shared_bit;
 
+const size_t g_page_size = PRESET_PAGESIZE;
+
 static int memory_mark_pages_shared(uint64_t addr, size_t size) {
     uint64_t mark_addr = addr;
     while (mark_addr < addr + size) {

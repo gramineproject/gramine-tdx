@@ -13,6 +13,8 @@
 
 #include "pal_common_structs.h"
 
+extern const size_t g_page_size;
+
 DEFINE_LIST(pal_handle);
 typedef struct pal_handle {
     PAL_HDR hdr;
