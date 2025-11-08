@@ -213,6 +213,8 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     g_pal_public_state.alloc_align = PAGE_SIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
 
+    g_pal_public_state.confidential_computing = true;
+
     uint64_t gpa_width = 0;
     for (EFI_HOB_GENERIC_HEADER* hob = hob_addr; !END_OF_HOB_LIST(hob); hob = GET_NEXT_HOB(hob)) {
         if (GET_HOB_TYPE(hob) == EFI_HOB_TYPE_CPU) {

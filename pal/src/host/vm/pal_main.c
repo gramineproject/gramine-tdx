@@ -167,6 +167,8 @@ noreturn void pal_start_c(void) {
     g_pal_public_state.alloc_align = PAGE_SIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
 
+    g_pal_public_state.confidential_computing = false;
+
     uint32_t num_cpus = rdfwcfg(FW_CFG_NB_CPUS, sizeof(uint32_t));
     if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
         INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
