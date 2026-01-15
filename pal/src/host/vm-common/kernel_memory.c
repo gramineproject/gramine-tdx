@@ -523,7 +523,6 @@ int memory_tighten_permissions(void) {
      * - Code segment [__text_start, __text_end): R-X (read-only, execute, kernel-only)
      */
     uint64_t data_start = (uint64_t)&__data_start;
-    // uint64_t ro_data_end = (uint64_t)&__ro_data_end;
     uint64_t data_end   = (uint64_t)&__data_end;
     data_end = ALIGN_UP(data_end, PAGE_SIZE);
 
