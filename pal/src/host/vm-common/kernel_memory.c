@@ -512,6 +512,30 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
 __attribute_no_sanitize_address
 int memory_tighten_permissions(void) {
     int ret;
+    /* Linker-provided symbols for PAL kernel memory layout */
+    extern char __text_start, __text_end;
+    extern char __data_start, __data_end;
+    /*
+     * PAL binary W^X (Write XOR Execute) enforcement:
+     * - Data segment [__data_start, __data_end): RW- (read-write, no execute, kernel-only)
+     * - Code segment [__text_start, __text_end): R-X (read-only, execute, kernel-only)
+     */
+    uint64_t data_start = (uint64_t)&__data_start;
+    uint64_t data_end   = (uint64_t)&__data_end;
+    uint64_t text_start = (uint64_t)&__text_start;
+    uint64_t text_end   = (uint64_t)&__text_end;
+    data_end = ALIGN_UP(data_end, PAGE_SIZE);
+    text_end = ALIGN_UP(text_end, PAGE_SIZE);
+    /* Enforce W^X: data segment must be writable but not executable */
+    ret = memory_mark_pages_on(data_start, data_end - data_start,
+                               /*write=*/true, /*execute=*/false, /*usermode=*/false);
+    if (ret < 0)
+        return ret;
+    /* Enforce W^X: code segment must be executable but not writable */
+    ret = memory_mark_pages_on(text_start, text_end - text_start,
+                               /*write=*/false, /*execute=*/true, /*usermode=*/false);
+    if (ret < 0)
+        return ret;
 
     /*
      * [0, 1MB): Legacy DOS (includes DOS area, SMM memory, System BIOS). We could not disable these
