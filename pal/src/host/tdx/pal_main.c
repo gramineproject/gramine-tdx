@@ -261,9 +261,6 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
         INIT_FAIL("Failed to initialize preloaded ranges");
 
     /* memory_pagetables_init() marked all pages as RWX, now is good time to revert to NONE. */
-    /* FIXME: whole PAL binary is RWX because memory_pagetables_init() marked everything as RWX and
-     *        prot_none_memory() does *not* modify perms for PAL binary memory pages since it is
-     *        part of "preloaded ranges" */
     prot_none_memory();
 
     ret = shared_memory_init(gpa_width);
