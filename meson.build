@@ -31,6 +31,8 @@ endif
 # we need this subdir() early, because we need scripts defined there for setting up global vars
 subdir('scripts')
 
+fs = import('fs')
+
 pkglibdir = get_option('libdir') / meson.project_name()
 pkgdatadir = get_option('datadir') / meson.project_name()
 
@@ -66,6 +68,28 @@ python3_platlib = run_command(
 python3_pkgdir = python3_platlib / 'graminelibos'
 
 pkgconfig = import('pkgconfig')
+
+tdshim_path_resolved = ''
+if tdx
+    tdshim_path_opt = get_option('tdshim_path')
+    if tdshim_path_opt == ''
+        error('TDX build requires -Dtdshim_path to be set (it cannot be empty). Point it to the TD-shim repo root.')
+    endif
+    tdshim_path_resolved = run_command(
+        python3,
+        '-c',
+        # Expand '$ENV' and '~', then convert to an absolute real path.
+        'import os,sys; print(os.path.realpath(os.path.expandvars(os.path.expanduser(sys.argv[1]))))',
+        tdshim_path_opt,
+        check: true,
+    ).stdout().strip()
+
+    if not fs.is_dir(tdshim_path_resolved)
+        error('Invalid -Dtdshim_path for TDX build.\n' +
+              'Resolved path is not a directory: @0@\n'.format(tdshim_path_resolved) +
+              'Set -Dtdshim_path to the TD-shim repo root.')
+    endif
+endif
 
 if host_machine.cpu_family() == 'x86_64'
     nasm_gen = generator(

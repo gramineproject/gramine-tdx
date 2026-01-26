@@ -100,13 +100,12 @@ libpal_tdx = executable('pal',
     install_dir: pkglibdir / 'tdx',
 )
 
-# FIXME: TD-shim should be installed somewhere global
 meson.add_install_script('/bin/sh', '-c',
     ('cd "@0@" && cargo run -p td-shim-tools --bin td-shim-ld -- ' +
      'target/x86_64-unknown-none/release/ResetVector.bin ' +
      'target/x86_64-unknown-none/release/td-shim ' +
      '-t executable -p "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/pal ' +
-     '-o "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/tdshim-pal').format(get_option('tdshim_path'), get_option('libdir'))
+     '-o "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/tdshim-pal').format(tdshim_path_resolved, get_option('libdir'))
 )
 
 libpal_tdx_dep = declare_dependency(
