@@ -110,13 +110,15 @@ meson.add_install_script('/bin/sh', '-c',
      'rv="$tdshim/target/x86_64-unknown-none/release/ResetVector.bin"; ' +
      'shim="$tdshim/target/x86_64-unknown-none/release/td-shim"; ' +
      'if [ ! -f "$rv" ] || [ ! -f "$shim" ]; then ' +
-         'echo "ERROR: TD-shim artifacts not found (expected $rv and $shim). Build TD-shim first."; ' +
+         'echo "ERROR: TD-shim artifacts not found (expected $rv and $shim)."; ' +
+         'echo "Build TD-shim first."; ' +
          'exit 1; ' +
      'fi; ' +
      'cd "$tdshim" && cargo run -p td-shim-tools --bin td-shim-ld -- ' +
      '"$rv" "$shim" ' +
      '-t executable -p "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/pal ' +
-     '-o "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/tdshim-pal').format(get_option('tdshim_path'), get_option('libdir'))
+     '-o "$MESON_INSTALL_DESTDIR_PREFIX"/@1@/gramine/tdx/tdshim-pal')
+     .format(get_option('tdshim_path'), get_option('libdir'))
 )
 
 libpal_tdx_dep = declare_dependency(
