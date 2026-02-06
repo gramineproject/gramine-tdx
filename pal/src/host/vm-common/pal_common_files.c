@@ -392,7 +392,9 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
     if (!handle->file.chunk_hashes) {
         /* case of allowed file */
         ret = emulate_file_map_via_read(handle->file.nodeid, handle->file.fh, addr, offset, size);
-        goto out;
+        if (ret < 0)
+            goto out;
+        goto post_map;
     }
 
     /* case of trusted file */
@@ -423,6 +425,7 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
         memset((char*)addr + bytes_filled, 0, size - bytes_filled);
     }
 
+post_map:
     if (!write) {
         /* restore read-only permission */
         ret = memory_protect(addr, size, read, /*write=*/false, execute);
