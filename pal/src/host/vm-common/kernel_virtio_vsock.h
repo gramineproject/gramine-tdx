@@ -122,7 +122,7 @@ struct virtio_vsock_connection {
     enum virtio_vsock_state state;
     int state_futex;
 
-    UT_hash_handle hh_host_port;
+    UT_hash_handle hh_connection_ports;
     uint64_t host_port;
     uint64_t guest_port;
 
