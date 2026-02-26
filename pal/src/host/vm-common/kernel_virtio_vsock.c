@@ -16,6 +16,8 @@
 #include "kernel_apic.h"
 #include "kernel_memory.h"
 #include "kernel_pci.h"
+#include "kernel_sched.h"
+#include "kernel_time.h"
 #include "kernel_virtio.h"
 #include "kernel_virtio_vsock.h"
 #include "vm_callbacks.h"
@@ -215,11 +217,15 @@ static uint32_t pick_new_port(void) {
 
 static void init_connection(struct virtio_vsock_connection* conn) {
     conn->state = VIRTIO_VSOCK_CLOSE;
+    sched_thread_wakeup(&conn->state_futex);
     conn->host_port    = 0;
     conn->guest_port   = 0;
     conn->pending_conn = VSOCK_MAX_CONNECTIONS;
     conn->prepared_for_user = 0;
     conn->consumed_by_user  = 0;
+    spinlock_init(&conn->state_lock);
+    /* the value doesn't matter, set just for sanity */
+    conn->state_futex = 0;
 }
 
 static void reinit_connection(struct virtio_vsock_connection* conn) {
@@ -500,11 +506,17 @@ static int process_packet(struct virtio_vsock_packet* packet) {
             return 0;
 
         case VIRTIO_VSOCK_CONNECT:
+            if (packet->header.op == VIRTIO_VSOCK_OP_RST) {
+                free(packet);
+                reinit_connection(conn);
+                return 0;
+            }
             if (packet->header.op != VIRTIO_VSOCK_OP_RESPONSE) {
                 neglect_packet_and_free(packet);
                 return -PAL_ERROR_DENIED;
             }
             conn->state = VIRTIO_VSOCK_ESTABLISHED;
+            sched_thread_wakeup(&conn->state_futex);
             free(packet);
             return 0;
 
@@ -540,6 +552,7 @@ static int process_packet(struct virtio_vsock_packet* packet) {
                 return -PAL_ERROR_DENIED;
             }
             conn->state = VIRTIO_VSOCK_CLOSE;
+            sched_thread_wakeup(&conn->state_futex);
             free(packet);
             return 0;
 
@@ -783,7 +796,7 @@ int virtio_vsock_socket(int domain, int type, int protocol) {
     if (!conn)
         return -PAL_ERROR_DENIED;
 
-    init_connection(conn);
+    reinit_connection(conn);
     return i;
 }
 
@@ -869,38 +882,78 @@ int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen) {
     return accepted_conn;
 }
 
-int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen) {
+int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t timeout_us) {
     if (!addr || addrlen < sizeof(struct sockaddr_vm))
         return -PAL_ERROR_INVAL;
 
     if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
         return -PAL_ERROR_BADHANDLE;
 
+    if (timeout_us == 0)
+        return -PAL_ERROR_INVAL;
+
     struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
     if (conn->state != VIRTIO_VSOCK_CLOSE)
         return -PAL_ERROR_STREAMEXIST;
 
+    int ret;
+    uint64_t timeout_absolute_us = 0;
+    void* timeout = NULL;
     struct sockaddr_vm* addr_vm = (struct sockaddr_vm*)addr;
-    conn->host_port  = addr_vm->svm_port;
-    conn->guest_port = pick_new_port();
 
-    int ret = send_request_packet(conn);
+    uint64_t curr_time_us;
+    ret = get_time_in_us(&curr_time_us);
     if (ret < 0)
         return ret;
 
-    conn->state = VIRTIO_VSOCK_CONNECT;
+    timeout_absolute_us = curr_time_us + timeout_us;
+    register_timeout(timeout_absolute_us, &conn->state_futex, &timeout);
+    if (ret < 0)
+        return ret;
 
-    uint32_t tries = 0;
+    conn->host_port  = addr_vm->svm_port;
+    conn->guest_port = pick_new_port();
+
+    ret = send_request_packet(conn);
+    if (ret < 0)
+        goto out;
+
+    conn->state = VIRTIO_VSOCK_CONNECT;
+    spinlock_lock(&conn->state_lock);
+
     while (conn->state != VIRTIO_VSOCK_ESTABLISHED) {
-        /* FIXME: we emulate timeout via a counter */
-        if (tries++ == 1024 * 1024) {
-            init_connection(conn);
-            return -PAL_ERROR_CONNFAILED;
+        if (conn->state != VIRTIO_VSOCK_CONNECT) {
+            ret = -PAL_ERROR_CONNFAILED;
+            break;
         }
-		CPU_RELAX();
+
+        /* check if timeout expired */
+        assert(timeout_absolute_us);
+
+        uint64_t curr_time_us;
+        ret = get_time_in_us(&curr_time_us);
+        if (ret < 0)
+            break;
+
+        if (timeout_absolute_us <= curr_time_us) {
+            ret = -PAL_ERROR_CONNFAILED; /* must return ETIMEOUT but PAL doesn't have such code */
+            break;
+        }
+
+        /* connection state not changed to ESTABLISHED, need to sleep */
+        sched_thread_wait(&conn->state_futex, &conn->state_lock);
     }
 
-    return 0;
+    spinlock_unlock(&conn->state_lock);
+
+out:
+    if (timeout)
+        deregister_timeout(timeout);
+
+    if (ret < 0)
+        reinit_connection(conn);
+
+    return ret;
 }
 
 int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen) {
@@ -1029,32 +1082,74 @@ long virtio_vsock_write(int sockfd, const void* buf, size_t count) {
     return sent;
 }
 
-int virtio_vsock_shutdown(int sockfd, int how) {
+int virtio_vsock_shutdown(int sockfd, int how, uint64_t timeout_us) {
     __UNUSED(how);
 
     if (sockfd < 0 || sockfd >= VSOCK_MAX_CONNECTIONS)
         return -PAL_ERROR_BADHANDLE;
 
-    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
-    if (conn->state == VIRTIO_VSOCK_ESTABLISHED || conn->state == VIRTIO_VSOCK_LISTEN) {
-        int ret = send_shutdown_packet(conn, VIRTIO_VSOCK_SHUTDOWN_COMPLETE);
-        if (ret < 0)
-            return ret;
+    if (timeout_us == 0)
+        return -PAL_ERROR_INVAL;
 
-        conn->state = VIRTIO_VSOCK_CLOSING;
-        uint32_t tries = 0;
-        while (conn->state != VIRTIO_VSOCK_CLOSE) {
-            /* FIXME: we emulate timeout via a counter */
-            if (tries++ == 1024 * 1024)
-                break;
-            CPU_RELAX();
+    int ret;
+    uint64_t timeout_absolute_us = 0;
+    void* timeout = NULL;
+    struct virtio_vsock_connection* conn = &g_vsock->conns[sockfd];
+
+    if (conn->state != VIRTIO_VSOCK_ESTABLISHED && conn->state != VIRTIO_VSOCK_LISTEN)
+        return -PAL_ERROR_NOTCONNECTION;
+
+    uint64_t curr_time_us;
+    ret = get_time_in_us(&curr_time_us);
+    if (ret < 0)
+        return ret;
+
+    timeout_absolute_us = curr_time_us + timeout_us;
+    register_timeout(timeout_absolute_us, &conn->state_futex, &timeout);
+    if (ret < 0)
+        return ret;
+
+    ret = send_shutdown_packet(conn, VIRTIO_VSOCK_SHUTDOWN_COMPLETE);
+    if (ret < 0)
+        goto out;
+
+    conn->state = VIRTIO_VSOCK_CLOSING;
+    spinlock_lock(&conn->state_lock);
+
+    while (conn->state != VIRTIO_VSOCK_CLOSE) {
+        if (conn->state != VIRTIO_VSOCK_CLOSING) {
+            ret = -PAL_ERROR_DENIED;
+            break;
         }
+
+        /* check if timeout expired */
+        assert(timeout_absolute_us);
+
+        uint64_t curr_time_us;
+        ret = get_time_in_us(&curr_time_us);
+        if (ret < 0)
+            break;
+
+        if (timeout_absolute_us <= curr_time_us) {
+            ret = -PAL_ERROR_DENIED;
+            break;
+        }
+
+        /* connection state not changed to CLOSE, need to sleep */
+        sched_thread_wait(&conn->state_futex, &conn->state_lock);
     }
 
+    spinlock_unlock(&conn->state_lock);
+
+out:
+    if (timeout)
+        deregister_timeout(timeout);
+
     reinit_connection(conn);
-    return 0;
+
+    return ret;
 }
 
-int virtio_vsock_close(int sockfd) {
-    return virtio_vsock_shutdown(sockfd, VIRTIO_VSOCK_SHUTDOWN_COMPLETE);
+int virtio_vsock_close(int sockfd, uint64_t timeout_us) {
+    return virtio_vsock_shutdown(sockfd, VIRTIO_VSOCK_SHUTDOWN_COMPLETE, timeout_us);
 }

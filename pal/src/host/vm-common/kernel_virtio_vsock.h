@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include "spinlock.h"
+
 #define AF_VSOCK 40
 
 #define VSOCK_HOST_CID 2
@@ -15,6 +17,18 @@
 
 /* for simplicity, each packet has statically allocated buffer for recv/send data */
 #define VSOCK_MAX_PAYLOAD_SIZE 16U /* FIXME: this small size is for testing, actually want ~4K */
+
+/* On Linux, initial SYNs for an active TCP connection attempt will be retransmitted 6 times by
+ * default. For example, with the current initial RTO (Retransmission Timeout) of 1s, the retries
+ * are staggered at 1s, 3s, 7s, 15s, 31s, 63s (the inter-retry time starts at 2s and then doubles
+ * each time). Thus the final timeout for an active TCP connection attempt will happen after 127s.
+ * See https://elixir.bootlin.com/linux/v6.3/source/include/net/tcp.h#L107. */
+#define VSOCK_CONNECT_TIMEOUT_US (127 * TIME_US_IN_S)
+
+/* IETF RFC 793 requires the `TIME-WAIT` state to last twice the time of the MSL (Maximum Segment
+ * Lifetime). On Linux, this duration is set to 60s, see:
+ * https://elixir.bootlin.com/linux/v6.3/source/include/net/tcp.h#L123. */
+#define VSOCK_CLOSE_TIMEOUT_US (60 * TIME_US_IN_S)
 
 enum virtio_vsock_state {
     VIRTIO_VSOCK_CLOSE,
@@ -84,6 +98,9 @@ struct virtio_vsock_connection {
     struct virtio_vsock_packet* packets_for_user[VSOCK_MAX_PACKETS];
     uint32_t prepared_for_user;
     uint32_t consumed_by_user;
+
+    spinlock_t state_lock;
+    int state_futex;
 };
 
 struct sockaddr_vm {
