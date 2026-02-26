@@ -39,6 +39,10 @@ struct pal_handle_inner_file {
     uint64_t nodeid;
     uint64_t fh;
     char* realpath;
+
+    /* below fields are used only for trusted files */
+    size_t size;
+    void*  chunk_hashes; /* array of hashes of file chunks (of type tdx_chunk_hash_t) */
 };
 
 struct pal_handle_inner_dir {
