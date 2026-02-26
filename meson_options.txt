@@ -26,6 +26,10 @@ option('asan', type: 'combo', choices: ['disabled', 'enabled'],
 option('libgomp', type: 'combo', choices: ['disabled', 'enabled'],
     description: 'Build patched libgomp (takes long time)')
 
+option('tdshim_path', type: 'string',
+    value: '$HOME/td-shim',
+    description: 'Path to TD-shim root directory (default: $HOME/td-shim)')
+
 option('syslibdir', type: 'string',
     description: 'Path to the system library directory')
 
