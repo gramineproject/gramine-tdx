@@ -34,10 +34,7 @@ typedef struct pal_handle {
         struct pal_handle_inner_sock    sock;
         struct pal_handle_inner_thread  thread;
         struct pal_handle_inner_event   event;
-
-        struct {
-            PAL_IDX unused;
-        } eventfd;
+        struct pal_handle_inner_eventfd eventfd;
 
         struct {
             PAL_IDX unused;
