@@ -263,27 +263,39 @@ int vm_virtualization_exception(struct isr_regs* regs) {
     switch (exit_reason) {
         case 10: /* CPUID */
             if (regs->rax == 0x2) {
-                /* TLB/Cache/Prefetch info: dummy values from Intel SDM, Vol. 2, Example 3-1 */
-                regs->rax = 0x665b5001;
-                regs->rbx = 0x0;
-                regs->rcx = 0x0;
-                regs->rdx = 0x7a7000;
+                /*
+                 * TLB/Cache/Prefetch info: "generic" dummy values, see Intel SDM, Vol. 2, Table
+                 * 3-12 for explanation of descriptors and their encodings:
+                 *   - RAX: 0x03 -- data TLB: 4K pages, 4-way, 64 entries
+                 *          0xb5 -- instruction TLB: 4K, 8-way, 64 entries
+                 *          0xc3 -- L2 TLB: 4K/2M pages, 6-way, 1536 entries
+                 *          0x01 -- required encoding for low bits in RAX
+                 *   - RBX: 0xf0 -- 64 byte prefetching
+                 *          0xff -- cache data is in CPUID leaf 4
+                 */
+                regs->rax = 0x03b5c301;
+                regs->rbx = 0x0000f0ff;
+                regs->rcx = 0x00000000;
+                regs->rdx = 0x00000000;
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x5) {
-                /* MONITOR/MWAIT -- hard-code values from real CPU */
+                /*
+                 * MONITOR/MWAIT -- no app should use it; hard-code minimal but reasonable values:
+                 *   - RAX: smallest monitor-line size = 64B
+                 *   - RBX: largest monitor-line size = 64B
+                 *   - RCX: MONITOR/MWAIT extensions, hard-code to zeros
+                 *   - RDX: number of sub-C-states supported using MWAIT, hard-code to zeros
+                 */
                 regs->rax = 0x00000040;
                 regs->rbx = 0x00000040;
-                regs->rcx = 0x00000003;
-                regs->rdx = 0x00001020;
+                regs->rcx = 0x00000000;
+                regs->rdx = 0x00000000;
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x6) {
-                /* Thermal and Power Management -- hard-code values from real CPU */
-                regs->rax = 0x00450ef7;
-                regs->rbx = 0x00000002;
-                regs->rcx = 0x00000009;
-                regs->rdx = 0x00000000;
+                /* Thermal and Power Management -- no app should use it, so return all zeros */
+                regs->rax = regs->rbx = regs->rcx = regs->rdx = 0x00000000;
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x7) {
@@ -295,7 +307,7 @@ int vm_virtualization_exception(struct isr_regs* regs) {
                     return 0;
                 }
             } else if (regs->rax == 0xb) {
-                /* Extended Topology Enumeration -- hard-code a single-core system */
+                /* Extended Topology Enumeration -- hard-code a single-core system (TODO) */
                 if (regs->rcx == 0x0) {
                     /* level: SMT */
                     regs->rax = 0x00000001; /* number of bits to shift right on x2APIC ID */
@@ -318,25 +330,35 @@ int vm_virtualization_exception(struct isr_regs* regs) {
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x80000002) {
-                /* Processor Brand String -- we hard-code "Intel(R) Xeon(R) Platinum 8480CTDX" */
+                /*
+                 * Processor Brand String -- we hard-code rather dummy string, see below.
+                 * This was calculated using the following C snippet:
+                 *
+                 *   char* s = "Intel Xeon Processor (Gramine-TDX dummy)";
+                 *   uint32_t regs[12] = {0};
+                 *   for (uint32_t i = 0; i < 48; i++) {
+                 *       uint32_t c = i < strlen(s) ? (uint32_t)s[i] : 0;
+                 *       regs[i >> 2] |= c << (8 * (i & 3));
+                 *   }
+                 */
                 regs->rax = 0x65746e49;
-                regs->rbx = 0x2952286c;
-                regs->rcx = 0x6f655820;
-                regs->rdx = 0x2952286e;
+                regs->rbx = 0x6558206c;
+                regs->rcx = 0x50206e6f;
+                regs->rdx = 0x65636f72;
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x80000003) {
                 /* Processor Brand String continued */
-                regs->rax = 0x616c5020;
-                regs->rbx = 0x756e6974;
-                regs->rcx = 0x3438206d;
-                regs->rdx = 0x54433038;
+                regs->rax = 0x726f7373;
+                regs->rbx = 0x72472820;
+                regs->rcx = 0x6e696d61;
+                regs->rdx = 0x44542d65;
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x80000004) {
                 /* Processor Brand String continued */
-                regs->rax = 0x00005844;
-                regs->rbx = 0x00000000;
+                regs->rax = 0x75642058;
+                regs->rbx = 0x29796d6d;
                 regs->rcx = 0x00000000;
                 regs->rdx = 0x00000000;
                 regs->rip += vmexit_instr_length;
@@ -347,7 +369,12 @@ int vm_virtualization_exception(struct isr_regs* regs) {
                 regs->rip += vmexit_instr_length;
                 return 0;
             } else if (regs->rax == 0x80000006) {
-                /* Cache info -- we hard-code dummy (taken from one SPR machine) */
+                /*
+                 * Cache info -- we hard-code dummy but reasonable values in RCX:
+                 *   - bits 07-00: cache line size = 64B
+                 *   - bits 15-12: L2 associative field is 07H (means "check CPUID leaf 0x4")
+                 *   - bits 31-16: cache size in 1K units = 2048 (i.e. 2MB)
+                 */
                 regs->rax = regs->rbx = regs->rdx = 0x00000000;
                 regs->rcx = 0x08007040;
                 regs->rip += vmexit_instr_length;
