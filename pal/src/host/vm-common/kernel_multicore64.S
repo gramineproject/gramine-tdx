@@ -63,7 +63,7 @@ ap_startup_page_start:
 
     // jump to pal_start_ap_c() entrypoint, together with setting the CS segment register
     mov     AP_STARTUP_PAGE_C_FUNC, %rax
-    push    $(_gdt_entry_kernel_cs - _gdt_start)
+    pushq   $(_gdt_entry_kernel_cs - _gdt_start)
     push    %rax
     lretq
 

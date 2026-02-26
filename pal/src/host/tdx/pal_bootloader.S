@@ -58,7 +58,7 @@ pal_start:
 
     // jump to pal_start_c() entrypoint, together with setting the CS segment register
     lea     pal_start_c(%rip), %rax
-    push    $(_gdt_entry_kernel_cs - _gdt_start)
+    pushq   $(_gdt_entry_kernel_cs - _gdt_start)
     push    %rax
     lretq
 
