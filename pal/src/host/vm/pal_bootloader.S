@@ -23,7 +23,7 @@ _start32:
     mov     %eax, %fs
     mov     %eax, %gs
     mov     %eax, %ss
-    lea     (__fw_base - _start32)(%ebp), %esp
+    lea     (_sys_initial_stack - _start32)(%ebp), %esp
     lea     (_start64 - _start32)(%ebp), %eax
     push    $(_gdt_entry_kernel_cs - _gdt_start)
     push    %eax
@@ -136,6 +136,10 @@ _gdtr:
 3:  .quad   pal_start
 4:
 
+    .bss
+    .align  0x10
+    .space  0x4000
+_sys_initial_stack:
 
     .sect   .resetvec, "ax"
     .align  0x80
