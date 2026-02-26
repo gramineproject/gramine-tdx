@@ -13,10 +13,16 @@
 
 #include "kernel_interrupts.h"
 
-/* FS_BASE: to allow apps (mainly Glibc) to set up Thread-Local Storage;
- * GS_BASE: used only in kernel mode (points to current TCB of Gramine thread) */
+/*
+ * FS_BASE: to allow apps (mainly Glibc) to set up Thread-Local Storage;
+ * GS_BASE: used only in kernel mode, points to current TCB of Gramine thread;
+ * GS_KERNEL_BASE: used only in kernel mode, points to per-CPU data
+ */
 #define MSR_IA32_FS_BASE        0xC0000100
 #define MSR_IA32_GS_BASE        0xC0000101
+#define MSR_IA32_GS_KERNEL_BASE 0xC0000102
+
+extern bool g_kick_sched_thread;
 
 /* the two helper functions are implemented in pal_common_threading.c which knows about the
  * relationship between the TCB (which is pointed to by GS base reg) and the thread struct */

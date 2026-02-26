@@ -2,7 +2,7 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 /*
- * Trivial round-robin scheduler implementation. Currently assumes single-core VM.
+ * Trivial round-robin Single Queue Multiprocessor Scheduler (SQMS) implementation.
  */
 
 #include <stdint.h>
@@ -12,6 +12,7 @@
 #include "pal_error.h"
 
 #include "kernel_interrupts.h"
+#include "kernel_multicore.h"
 #include "kernel_sched.h"
 #include "kernel_thread.h"
 #include "kernel_xsave.h"
@@ -29,6 +30,9 @@ static LISTP_TYPE(thread) g_thread_list = LISTP_INIT;
  *   - if used in normal (interruptible) context, must call spinlock_lock_disable_irq()
  */
 static spinlock_t g_thread_list_lock = INIT_SPINLOCK_UNLOCKED;
+
+/* Atomic variable used to kick sched_thread() into action (instead of waiting for some time) */
+bool g_kick_sched_thread = false;
 
 static uint64_t get_rflags(void) {
     uint64_t result;
@@ -74,34 +78,41 @@ static void save_userland_context(struct thread* curr_thread, struct isr_regs* u
 static struct thread* find_next_thread(struct thread* curr_thread) {
     assert(spinlock_is_locked(&g_thread_list_lock));
 
-    struct thread* next_thread = NULL;
-
-    if (curr_thread) {
-        /* move currently executing thread to the back of the list for round robin scheding (but
-         * before very-last bottomhalves and idle threads, to not switch to them constantly) */
+    if (curr_thread && !curr_thread->is_helper) {
+        /* move currently executing thread to the back of the list for round robin scheding */
         LISTP_DEL(curr_thread, &g_thread_list, list);
         LISTP_ADD_TAIL(curr_thread, &g_thread_list, list);
-
-        if (g_bottomhalves_thread) {
-            LISTP_DEL(g_bottomhalves_thread, &g_thread_list, list);
-            LISTP_ADD_TAIL(g_bottomhalves_thread, &g_thread_list, list);
-        }
-
-        if (g_idle_thread) {
-            LISTP_DEL(g_idle_thread, &g_thread_list, list);
-            LISTP_ADD_TAIL(g_idle_thread, &g_thread_list, list);
-        }
     }
+
+    struct thread* next_thread = NULL;
 
     struct thread* thread;
     LISTP_FOR_EACH_ENTRY(thread, &g_thread_list, list) {
-        if (thread->state == THREAD_RUNNABLE) {
-            next_thread = thread;
-            break;
+        if (thread->state == THREAD_RUNNABLE &&
+                __atomic_load_n(&thread->is_running, __ATOMIC_ACQUIRE) == 0) {
+            if (!next_thread) {
+                /* found first runnable thread, mark it as to-be-run next */
+                next_thread = thread;
+            } else {
+                /* found second runnable thread, kick some other CPU to schedule that thread */
+                __atomic_store_n(&g_kick_sched_thread, true, __ATOMIC_RELEASE);
+                break;
+            }
         }
     }
 
-    assert(next_thread);
+    if (!next_thread && get_per_cpu_data()->cpu_id == 0) {
+        /* CPU0 must periodically handle incoming events (network packets, stdin) */
+        assert(get_per_cpu_data()->bottomhalves_thread);
+        next_thread = get_per_cpu_data()->bottomhalves_thread;
+    }
+
+    if (!next_thread) {
+        /* absolutely no tasks to do */
+        assert(get_per_cpu_data()->idle_thread);
+        next_thread = get_per_cpu_data()->idle_thread;
+    }
+
     return next_thread;
 }
 
@@ -109,11 +120,21 @@ void sched_thread_uninterruptable(struct isr_regs* userland_regs) {
     uint64_t curr_gs_base = rdmsr(MSR_IA32_GS_BASE);
     struct thread* curr_thread = curr_gs_base ? get_thread_ptr(curr_gs_base) : NULL;
 
-    /* even though locking is not needed (we are guaranteed to run uncontested), we may jump into
-     * the thread_scheduler() context of a thread that grabbed g_thread_list_lock beforehand */
     spinlock_lock(&g_thread_list_lock);
     struct thread* next_thread = find_next_thread(curr_thread);
+    if (curr_thread && curr_thread->state == THREAD_RUNNING)
+        curr_thread->state = THREAD_RUNNABLE;
+    next_thread->state = THREAD_RUNNING;
     spinlock_unlock(&g_thread_list_lock);
+
+#if 0
+    if (next_thread != curr_thread) {
+        log_always("--- sched_thread_un on cpu_id %u\t: thread %u (%s) replaced with %u",
+                   get_per_cpu_data()->cpu_id, curr_thread ? curr_thread->thread_id : 0,
+                   curr_thread ? (curr_thread->is_helper ? "help" : "norm") : "none",
+                   next_thread->thread_id);
+    }
+#endif
 
     if (next_thread == curr_thread) {
         /* re-scheduled the same thread, no need to save/restore context */
@@ -125,6 +146,8 @@ void sched_thread_uninterruptable(struct isr_regs* userland_regs) {
      * restored ring-0 context will have different values on stack. Instead, we manually save the
      * userland context and rewire RIP to point to a special "return via iret" assembly. */
     save_userland_context(curr_thread, userland_regs);
+
+    __atomic_store_n(&curr_thread->is_running, 0, __ATOMIC_RELEASE);
 
     /* it is cumbersome to restore FSBASE in asm, so restore explicitly here */
     wrmsr(MSR_IA32_FS_BASE, next_thread->context.user_fsbase);
@@ -140,7 +163,19 @@ void sched_thread(uint32_t* lock_to_unlock, int* clear_child_tid) {
 
     spinlock_lock_disable_irq(&g_thread_list_lock);
     struct thread* next_thread = find_next_thread(curr_thread);
+    if (curr_thread && curr_thread->state == THREAD_RUNNING)
+        curr_thread->state = THREAD_RUNNABLE;
+    next_thread->state = THREAD_RUNNING;
     spinlock_unlock_enable_irq(&g_thread_list_lock);
+
+#if 0
+    if (next_thread != curr_thread) {
+        log_always("--- sched_thread on cpu_id %u\t: thread %u (%s) replaced with %u",
+                   get_per_cpu_data()->cpu_id, curr_thread ? curr_thread->thread_id : 0,
+                   curr_thread ? (curr_thread->is_helper ? "help" : "norm") : "none",
+                   next_thread->thread_id);
+    }
+#endif
 
     if (next_thread == curr_thread) {
         /* re-scheduled the same thread, no need to save/restore context */
@@ -177,7 +212,10 @@ void sched_thread_wait(int* futex_word, spinlock_t* lock) {
     spinlock_lock(lock);
 }
 
-void sched_thread_wakeup_uninterruptable(int* futex_word) {
+static void sched_thread_wakeup_common(int* futex_word) {
+    assert(spinlock_is_locked(&g_thread_list_lock));
+
+    bool found = false;
     struct thread* thread;
     LISTP_FOR_EACH_ENTRY(thread, &g_thread_list, list) {
         if (thread->state == THREAD_BLOCKED) {
@@ -185,14 +223,24 @@ void sched_thread_wakeup_uninterruptable(int* futex_word) {
             if (thread->blocked_on == futex_word) {
                 thread->state      = THREAD_RUNNABLE;
                 thread->blocked_on = NULL;
+                found = true;
             }
         }
     }
+
+    if (found)
+        __atomic_store_n(&g_kick_sched_thread, true, __ATOMIC_RELEASE);
+}
+
+void sched_thread_wakeup_uninterruptable(int* futex_word) {
+    spinlock_lock(&g_thread_list_lock);
+    sched_thread_wakeup_common(futex_word);
+    spinlock_unlock(&g_thread_list_lock);
 }
 
 void sched_thread_wakeup(int* futex_word) {
     spinlock_lock_disable_irq(&g_thread_list_lock);
-    sched_thread_wakeup_uninterruptable(futex_word);
+    sched_thread_wakeup_common(futex_word);
     spinlock_unlock_enable_irq(&g_thread_list_lock);
 }
 
@@ -205,5 +253,8 @@ void sched_thread_add(struct thread* thread) {
 void sched_thread_remove(struct thread* thread) {
     spinlock_lock_disable_irq(&g_thread_list_lock);
     LISTP_DEL(thread, &g_thread_list, list);
+    thread->state = THREAD_STOPPED;
+    thread->blocked_on = NULL;
+    __atomic_store_n(&thread->is_running, 0, __ATOMIC_RELEASE);
     spinlock_unlock_enable_irq(&g_thread_list_lock);
 }

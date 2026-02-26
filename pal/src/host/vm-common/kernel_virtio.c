@@ -4,6 +4,14 @@
 /*
  * Common functionality of virtio device drivers.
  *
+ * Notes on multi-core synchronization:
+ *   - virtq_create(), virtq_free(), virtq_add_to_device() called only at init, no sync required
+ *   - virtq_alloc_desc(), virtq_is_desc_free(), virtq_free_desc() on a particular queue must be
+ *     protected by a corresponding lock:
+ *      - for g_console->tq, it is g_console_transmit_lock
+ *      - for g_fs->requests, it is g_fs_lock
+ *      - for g_vsock->tq, it is g_vsock_transmit_lock
+ *
  * Reference: https://docs.oasis-open.org/virtio/virtio/v1.1/csprd01/virtio-v1.1-csprd01.pdf
  */
 

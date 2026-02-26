@@ -21,7 +21,7 @@ _start32:
     mov     %eax, %gs
     mov     %eax, %ss
 
-    lea     (_pml4_table_base - _start32)(%ebp), %eax
+    lea     (_initial_pml4_table_base - _start32)(%ebp), %eax
     mov     %eax, %cr3
 
     mov     %cr4, %eax
@@ -30,6 +30,7 @@ _start32:
 
     xor     %edx, %edx
     mov     $3, %eax                    // SSE and X87
+    xor     %ecx, %ecx
     xsetbv
 
     mov     %cr0, %eax
@@ -90,7 +91,7 @@ _end:
     .align  0x1000, 0
 
 // 512GB entries (PML4E): one page with single entry
-_pml4_table_base:
+_initial_pml4_table_base:
     .quad   3b + 0x7                          // 7 = User, Writable, Present
     .align  0x1000, 0
 

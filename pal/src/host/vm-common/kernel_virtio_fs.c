@@ -55,6 +55,25 @@
 
 struct virtio_fs* g_fs = NULL;
 
+/*
+ * Coarse-grained lock to sync all FS operations on multi-core systems, see kernel_virtio.h.
+ *
+ * Multi-core support is unscalable: there is a single lock that effectively serializes all FS
+ * operations. Moreover, once an FS operation is started, there will be no progress until it
+ * finishes (i.e. until the device populates the responses, sends a HW interrupt, this interrupt is
+ * caught by the ISR and the thread is unblocked on `device_done` variable). There are two
+ * scalability bottlenecks:
+ *   - All threads that perform FS operations are serialized on a single lock.
+ *   - Each thread spins on `device_done` until the device signals that it's done via an interrupt.
+ *
+ * To make the FS implementation scalable, we could (1) allocate as many request virtqueues as there
+ * are CPUs, and (2) put threads to sleep instead of spinning on `device_done`.
+ *
+ * For now we assume that FS operations are sufficiently rare and typically single-threaded, so we
+ * don't optimize for scalability.
+ */
+static spinlock_t g_fs_lock = INIT_SPINLOCK_UNLOCKED;
+
 struct virtio_fs_desc {
     void*    addr;
     size_t   size;
@@ -84,7 +103,7 @@ int virtio_fs_isr(void) {
         /* it is an actual change in "used" ring (not a spurious one), memoize it and kick the
          * waiting thread that issued the request */
         g_fs->requests->seen_used = host_used_idx;
-        g_fs->device_done = true;
+        __atomic_store_n(&g_fs->device_done, true, __ATOMIC_RELEASE);
     }
 
     if (interrupt_status & VIRTIO_INTERRUPT_STATUS_CONFIG) {
@@ -104,10 +123,19 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
     /* no FUSE request has less that 3 descriptors (at least fuse_in, data_in, fuse_out) */
     assert(count >= 3);
 
-    if (g_fs->device_done) {
-        /* sanity check: must not happen because we are single-core and interrupt routines never
-         * send FS requests -- i.e. only one kernel-thread context can send FS request at a time */
-        return -PAL_ERROR_DENIED;
+    spinlock_lock(&g_fs_lock);
+
+    for (size_t i = 0; i < count; i++) {
+        /* reset for sanity */
+        descs[i].allocated = false;
+    }
+
+    if (__atomic_load_n(&g_fs->device_done, __ATOMIC_ACQUIRE)) {
+        /* sanity check: must not happen because all FS operations are synced on a global lock and
+         * interrupt routines never send FS requests -- i.e. only one kernel-thread context can send
+         * FS request at a time */
+        ret = -PAL_ERROR_DENIED;
+        goto out;
     }
 
     size_t total_in_size  = 0;
@@ -121,12 +149,12 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
 
     if (total_in_size + total_out_size > VIRTIO_FS_SHARED_BUF_SIZE) {
         /* FS request doesn't fit into shared buffer, cannot send it */
-        return -PAL_ERROR_NOMEM;
+        ret = -PAL_ERROR_NOMEM;
+        goto out;
     }
 
-    /* we spin on device_done (until it becomes true) to wait for the device notification; since
-     * this is a global var, it's not thread-safe (not suitable for multi-core) */
-    g_fs->device_done = false;
+    /* we spin on device_done (until it becomes true) to wait for the device notification */
+    __atomic_store_n(&g_fs->device_done, false, __ATOMIC_RELEASE);
 
     struct fuse_in_header* hdr_in = descs[0].addr;
     hdr_in->len = total_in_size;
@@ -143,7 +171,6 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
             flags |= VIRTQ_DESC_F_WRITE;
         }
 
-        descs[i].allocated = false; /* reset for sanity */
         ret = virtq_alloc_desc(g_fs->requests, shared_buf_addr, descs[i].size, flags,
                                &descs[i].idx);
         if (ret < 0)
@@ -167,7 +194,7 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
 
 	vm_mmio_writew(g_fs->requests_notify_addr, /*queue_sel=*/1);
 
-    while (__atomic_load_n(&g_fs->device_done, __ATOMIC_RELAXED) != true) {
+    while (__atomic_load_n(&g_fs->device_done, __ATOMIC_ACQUIRE) != true) {
         /* FIXME: simply spinning until the VMM processes the request; maybe we could use MWAIT? */
         CPU_RELAX();
     }
@@ -181,12 +208,14 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
         shared_buf_addr += descs[i].size;
     }
 
-    g_fs->device_done = false; /* reset for the next FS request */
+    __atomic_store_n(&g_fs->device_done, false, __ATOMIC_RELEASE); /* reset for next FS request */
     ret = 0;
 out:
-    for (size_t i = 0; i < count; i++)
+    for (size_t i = 0; i < count; i++) {
         if (descs[i].allocated)
             virtq_free_desc(g_fs->requests, descs[i].idx);
+    }
+    spinlock_unlock(&g_fs_lock);
     return ret;
 }
 

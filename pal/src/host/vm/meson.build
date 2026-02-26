@@ -48,6 +48,7 @@ pal_vm_sources = files(
 libpal_vm = executable('pal',
     pal_vm_sources,
     pal_vm_common_sources,
+    pal_vm_common_nontdx_sources,
     pal_vm_common_asm_offsets_h,
     pal_common_sources,
 

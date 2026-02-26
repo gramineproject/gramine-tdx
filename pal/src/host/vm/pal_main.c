@@ -25,6 +25,7 @@
 #include "kernel_files.h"
 #include "kernel_interrupts.h"
 #include "kernel_memory.h"
+#include "kernel_multicore.h"
 #include "kernel_pci.h"
 #include "kernel_sched.h"
 #include "kernel_syscalls.h"
@@ -36,8 +37,6 @@
 uint64_t g_tsc_mhz;
 
 static struct pal_handle* g_first_thread_handle = NULL;
-static struct pal_handle* g_idle_thread_handle = NULL;
-static struct pal_handle* g_bottomhalves_thread_handle = NULL;
 
 #define FW_CFG_RAM_SIZE 0x03 /* 64-bit RAM size in bytes */
 #define FW_CFG_NB_CPUS  0x05 /* 32-bit number of vCPUs */
@@ -160,6 +159,11 @@ noreturn void pal_start_c(void) {
     g_pal_public_state.alloc_align = PRESET_PAGESIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
 
+    uint32_t num_cpus = rdfwcfg(FW_CFG_NB_CPUS, sizeof(uint32_t));
+    if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
+        INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
+                  MAX_NUM_CPUS);
+
     e820_table_entry e820 = { .address = 0x0,
                               .size    = rdfwcfg(FW_CFG_RAM_SIZE, sizeof(uint64_t)),
                               .type    = E820_ADDRESS_RANGE_MEMORY };
@@ -221,15 +225,19 @@ noreturn void pal_start_c(void) {
     if (ret < 0)
         INIT_FAIL("Failed to initialize system call handling");
 
-    uint32_t num_cpus = rdfwcfg(FW_CFG_NB_CPUS, sizeof(uint32_t));
-    if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
-        INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
-                  MAX_NUM_CPUS);
+    /* must be called before interrupts_init() because it allocates interrupt stacks/XSAVE areas */
+    ret = init_multicore_prepare(num_cpus);
+    if (ret < 0)
+        INIT_FAIL("Failed to initialize multicore preparation (per-CPU data and stacks)");
 
     /* interrupts must be enabled (via `sti`) after all other parts of the kernel are initialized */
     ret = interrupts_init();
     if (ret < 0)
         INIT_FAIL("Failed to initialize interrupt/exception handling");
+
+    ret = init_multicore(num_cpus, /*hob_list_addr=*/NULL);
+    if (ret < 0)
+        INIT_FAIL("Failed to initialize multicore (BSP CPU couldn't init AP CPUs)");
 
     if (!g_console)
         INIT_FAIL("Failed to initialize virtio-console driver");
@@ -250,14 +258,6 @@ noreturn void pal_start_c(void) {
     ret = virtio_fs_fuse_init();
     if (ret < 0)
         INIT_FAIL("Failed FUSE_INIT request of virtio-fs driver");
-
-    ret = _PalThreadCreate(&g_idle_thread_handle, thread_idle_run, NULL);
-    if (ret < 0)
-        INIT_FAIL("Failed to create idle thread");
-
-    ret = _PalThreadCreate(&g_bottomhalves_thread_handle, thread_bottomhalves_run, NULL);
-    if (ret < 0)
-        INIT_FAIL("Failed to create bottomhalves thread");
 
     ret = _PalThreadCreate(&g_first_thread_handle, pal_start_continue, cmdline);
     if (ret < 0)

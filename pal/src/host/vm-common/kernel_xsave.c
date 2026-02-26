@@ -1,6 +1,13 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 /* Copyright (C) 2023 Intel Corporation */
 
+/*
+ * Enablement of XSAVE features.
+ *
+ * Notes on multi-core synchronization:
+ *   - All functions are called at init, no sync required
+ */
+
 #include <stdint.h>
 
 #include "api.h"
@@ -13,6 +20,7 @@
 #define CPUID_FEATURE_XSAVE   (1UL << 26)
 #define CPUID_FEATURE_OSXSAVE (1UL << 27)
 
+uint64_t g_xcr0 = 0;
 uint32_t g_xsave_size = 0;
 
 const uint32_t g_xsave_reset_state[VM_XSAVE_RESET_STATE_SIZE / sizeof(uint32_t)]
@@ -72,6 +80,7 @@ int xsave_init(void) {
 
     __asm__ volatile("xsetbv" : : "a"(xcr0), "c"(0), "d"(0));
 
+    g_xcr0 = xcr0;
     g_xsave_size = xsavesize;
     return 0;
 }
