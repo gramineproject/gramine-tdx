@@ -55,7 +55,8 @@ CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
         $QEMU_VIRTIO_CONSOLE $QEMU_VIRTIO_FS $QEMU_VIRTIO_VSOCK \
         -bios "$TDSHIM_PAL_PATH" \
         -fw_cfg name=opt/gramine/pwd,string="$PWD" \
-        -fw_cfg name=opt/gramine/cmdline,string="$GRAMINE_ARGS")
+        -fw_cfg name=opt/gramine/cmdline,string="$GRAMINE_ARGS" \
+        -fw_cfg name=opt/gramine/unixtime_s,string="$EPOCHSECONDS")
 
 virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error --sandbox none &
 exec env "${CMD[@]}"
