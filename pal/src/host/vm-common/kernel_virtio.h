@@ -313,7 +313,7 @@ struct virtio_vsock_config {
  *   - tq_notify_addr is set at init and used in copy_into_tq(), sync via transmit-side lock
  *   - host_cid is set at init, no sync required
  *   - guest_cid is set at init, no sync required
- *   - conns_size, conns, conns_by_host_port used in many places, sync via connections lock
+ *   - conns_size, conns, conns_by_port_pair used in many places, sync via connections lock
  *   - pending_tq_control_packets and co. used during TX, sync via transmit-side lock
  *   - shared_rq_buf is set at init and used during RX, sync via receive-side lock
  *   - shared_tq_buf is set at init and used in copy_into_tq(), sync via transmit-side lock
@@ -334,7 +334,7 @@ struct virtio_vsock {
 
     uint32_t conns_size;                    /* size of dynamic array */
     struct virtio_vsock_connection** conns; /* dynamic array: fd -> connection */
-    struct virtio_vsock_connection* conns_by_host_port; /* hash table: host port -> connection */
+    struct virtio_vsock_connection* conns_by_port_pair; /* hash table: (host_port, guest_port) -> connection */
 
     struct virtio_vsock_packet** pending_tq_control_packets;
     uint32_t pending_tq_control_packets_cnt;

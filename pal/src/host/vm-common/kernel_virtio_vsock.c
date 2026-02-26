@@ -503,20 +503,28 @@ static void detach_connection(uint32_t fd) {
     conn->fd = UINT32_MAX;
 }
 
-static void host_port_add(struct virtio_vsock_connection* conn) {
+static void connection_port_pair_add(struct virtio_vsock_connection* conn) {
     assert(spinlock_is_locked(&g_vsock_connections_lock));
-    HASH_ADD(hh_host_port, g_vsock->conns_by_host_port, host_port, sizeof(conn->host_port), conn);
+    HASH_ADD(hh_port_pair, g_vsock->conns_by_port_pair, port_pair, sizeof(conn->port_pair), conn);
 }
 
-static void host_port_delete(struct virtio_vsock_connection* conn) {
+static void connection_port_pair_delete(struct virtio_vsock_connection* conn) {
     assert(spinlock_is_locked(&g_vsock_connections_lock));
-    HASH_DELETE(hh_host_port, g_vsock->conns_by_host_port, conn);
+    HASH_DELETE(hh_port_pair, g_vsock->conns_by_port_pair, conn);
 }
 
-static void host_port_find(uint64_t host_port, struct virtio_vsock_connection** out_conn) {
+static void connection_port_pair_find(uint64_t host_port, uint64_t guest_port,
+                                      struct virtio_vsock_connection** out_conn) {
     assert(spinlock_is_locked(&g_vsock_connections_lock));
+    struct {
+        uint64_t host_port;
+        uint64_t guest_port;
+    } port_pair = {
+        .host_port = host_port,
+        .guest_port = guest_port,
+    };
     struct virtio_vsock_connection* conn = NULL;
-    HASH_FIND(hh_host_port, g_vsock->conns_by_host_port, &host_port, sizeof(host_port), conn);
+    HASH_FIND(hh_port_pair, g_vsock->conns_by_port_pair, &port_pair, sizeof(port_pair), conn);
     *out_conn = conn;
 }
 
@@ -527,8 +535,8 @@ static uint64_t pick_new_port(void) {
     uint64_t max_port = VSOCK_STARTING_PORT;
     for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
         struct virtio_vsock_connection* conn = g_vsock->conns[i];
-        if (conn && conn->guest_port > max_port)
-            max_port = conn->guest_port;
+        if (conn && conn->port_pair.guest_port > max_port)
+            max_port = conn->port_pair.guest_port;
     }
     return max_port + 1;
 }
@@ -541,10 +549,10 @@ static void cleanup_connection(struct virtio_vsock_connection* conn) {
         conn->consumed_by_user++;
     }
 
-    if (conn->host_port)
-        host_port_delete(conn);
-    conn->host_port = 0;
-    conn->guest_port = 0;
+    if (conn->port_pair.host_port)
+        connection_port_pair_delete(conn);
+    conn->port_pair.host_port  = 0;
+    conn->port_pair.guest_port = 0;
 
     for (uint32_t i = 0; i < conn->pending_conn_fds_cnt; i++) {
         /* there may be pending connections, and we clean up a connection that could accept them */
@@ -571,8 +579,8 @@ static struct virtio_vsock_connection* create_connection(uint64_t host_port, uin
         return NULL;
 
     conn->state = state;
-    conn->host_port  = host_port;
-    conn->guest_port = guest_port;
+    conn->port_pair.host_port  = host_port;
+    conn->port_pair.guest_port = guest_port;
 
     conn->fwd_cnt   = 0;
     conn->buf_alloc = VSOCK_MAX_PACKETS * VSOCK_MAX_PAYLOAD_SIZE;
@@ -582,7 +590,7 @@ static struct virtio_vsock_connection* create_connection(uint64_t host_port, uin
         return NULL;
     }
     if (host_port)
-        host_port_add(conn);
+        connection_port_pair_add(conn);
 
     return conn;
 }
@@ -611,8 +619,8 @@ static struct virtio_vsock_packet* generate_packet(struct virtio_vsock_connectio
     packet->header.dst_cid  = g_vsock->host_cid;
     packet->header.src_cid  = g_vsock->guest_cid;
 
-    packet->header.dst_port = conn->host_port;
-    packet->header.src_port = conn->guest_port;
+    packet->header.dst_port = conn->port_pair.host_port;
+    packet->header.src_port = conn->port_pair.guest_port;
 
     packet->header.type  = VIRTIO_VSOCK_TYPE_STREAM;
     packet->header.op    = op;
@@ -812,9 +820,12 @@ static int process_packet(struct virtio_vsock_packet* packet) {
     spinlock_lock(&g_vsock_connections_lock);
 
     /* guest and host CIDs are set in stone, so it is enough to distinguish connections based on the
-     * host's port (which is the `src_port` in the incoming packet) */
+     * host's port and guest's port.
+     * (which is the `src_port` and `dst_port` in the incoming packet) 
+     */
     uint64_t host_port = packet->header.src_port;
-    host_port_find(host_port, &conn);
+    uint64_t guest_port = packet->header.dst_port;
+    connection_port_pair_find(host_port, guest_port, &conn);
 
     if (!conn && packet->header.op == VIRTIO_VSOCK_OP_REQUEST) {
         /* loop through all connections, trying to find a listening conn on this port; this is a
@@ -822,7 +833,7 @@ static int process_packet(struct virtio_vsock_packet* packet) {
         for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
             struct virtio_vsock_connection* check_conn = g_vsock->conns[i];
             if (check_conn && check_conn->state == VIRTIO_VSOCK_LISTEN
-                    && check_conn->guest_port == packet->header.dst_port) {
+                    && check_conn->port_pair.guest_port == packet->header.dst_port) {
                 conn = check_conn;
                 break;
             }
@@ -1170,7 +1181,7 @@ int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_conf
     vsock->pending_tq_control_packets_cnt = 0;
     vsock->pending_tq_control_packets_idx = 0;
 
-    vsock->conns_by_host_port = NULL;
+    vsock->conns_by_port_pair = NULL;
 
     g_vsock = vsock;
     return 0;
@@ -1228,7 +1239,7 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
         goto out;
     }
 
-    if (conn->state != VIRTIO_VSOCK_CLOSE || conn->guest_port != 0) {
+    if (conn->state != VIRTIO_VSOCK_CLOSE || conn->port_pair.guest_port != 0) {
         ret = -PAL_ERROR_INVAL;
         goto out;
     }
@@ -1247,7 +1258,7 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
          * is a slow O(n) implementation but such ops should be rare */
         for (uint32_t i = 0; i < g_vsock->conns_size; i++) {
             struct virtio_vsock_connection* check_conn = g_vsock->conns[i];
-            if (!check_conn || check_conn->guest_port != bind_to_port)
+            if (!check_conn || check_conn->port_pair.guest_port != bind_to_port)
                 continue;
 
             if (is_ipv4 && check_conn->ipv6_bound && check_conn->ipv6_v6only) {
@@ -1272,8 +1283,8 @@ int virtio_vsock_bind(int sockfd, const void* addr, size_t addrlen, uint16_t* ou
     if (out_new_port)
         *out_new_port = bind_to_port;
 
-    conn->guest_port = bind_to_port;
-    conn->host_port  = 0;
+    conn->port_pair.guest_port = bind_to_port;
+    conn->port_pair.host_port = 0;
 
     conn->ipv6_v6only = ipv6_v6only;
     if (is_ipv4) {
@@ -1311,7 +1322,7 @@ int virtio_vsock_listen(int sockfd, int backlog) {
         goto out;
     }
 
-    if (conn->guest_port == 0) {
+    if (conn->port_pair.guest_port == 0) {
         /* not yet bound */
         ret = -PAL_ERROR_STREAMNOTEXIST;
         goto out;
@@ -1375,7 +1386,7 @@ int virtio_vsock_accept(int sockfd, void* addr, size_t* addrlen) {
     addr_vm->svm_family = AF_VSOCK;
     addr_vm->svm_reserved1 = 0;
     addr_vm->svm_cid = g_vsock->host_cid;
-    addr_vm->svm_port = accepted_conn->host_port;
+    addr_vm->svm_port = accepted_conn->port_pair.host_port;
 
     conn->pending_conn_fds_idx++;
     conn->pending_conn_fds_cnt--;
@@ -1424,10 +1435,10 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
     if (ret < 0)
         goto out;
 
-    assert(conn->host_port == 0 && conn->guest_port == 0);
-    conn->host_port  = addr_vm->svm_port;
-    conn->guest_port = pick_new_port();
-    host_port_add(conn);
+    assert(conn->port_pair.host_port == 0 && conn->port_pair.guest_port == 0);
+    conn->port_pair.host_port  = addr_vm->svm_port;
+    conn->port_pair.guest_port = pick_new_port();
+    connection_port_pair_add(conn);
 
     ret = send_request_packet(conn);
     if (ret < 0)
@@ -1493,7 +1504,7 @@ int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen) {
     addr_vm->svm_family = AF_VSOCK;
     addr_vm->svm_reserved1 = 0;
     addr_vm->svm_cid = g_vsock->guest_cid;
-    addr_vm->svm_port = conn->guest_port;
+    addr_vm->svm_port = conn->port_pair.guest_port;
 
     ret = 0;
 out:
