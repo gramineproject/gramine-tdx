@@ -78,6 +78,8 @@ static uint16_t find_fw_cfg_selector(const char* fw_cfg_name) {
 
     /* QEMU provides in big-endian, but our x86-64 CPU is little-endian */
     fw_cfg_files_count = __builtin_bswap32(fw_cfg_files_count);
+    if (fw_cfg_files_count > MAX_FW_CFG_FILES)
+        return 0;
 
     uint16_t fw_cfg_selector = 0;
     for (size_t i = 0; i < fw_cfg_files_count; i++) {
@@ -85,6 +87,11 @@ static uint16_t find_fw_cfg_selector(const char* fw_cfg_name) {
         uint8_t* fw_cfg_file_raw = (uint8_t*)&fw_cfg_file;
         for (size_t j = 0; j < sizeof(fw_cfg_file); j++)
             fw_cfg_file_raw[j] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
+
+        if (strlen(fw_cfg_name) + 1 > sizeof(fw_cfg_file.name)) {
+            /* make sure the searched-for string is less than the fw_cfg file name limit (56) */
+            return 0;
+        }
 
         if (strcmp(fw_cfg_file.name, fw_cfg_name) == 0) {
             fw_cfg_selector = fw_cfg_file.select;
@@ -110,6 +117,7 @@ int cmdline_init(char* cmdline, size_t cmdline_size) {
     if (cmdline_len == 0 || cmdline_len >= PATH_MAX)
         return -PAL_ERROR_INVAL;
 
+    /* note that cmdline is guaranteed to be NULL terminated and have at least one symbol */
     return 0;
 }
 
@@ -126,5 +134,6 @@ int host_pwd_init(void) {
     if (len == 0)
         return -PAL_ERROR_INVAL;
 
+    /* note that host PWD is guaranteed to be NULL terminated and have at least one symbol */
     return 0;
 }
