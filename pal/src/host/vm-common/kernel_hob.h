@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "api.h"
+
 #pragma pack(push, 1)
 
 /* basic UEFI types; note that UEFI integers are little endian */
@@ -263,6 +265,8 @@ typedef struct {
 #define GET_GUID_HOB_DATA(hob)      (void*)((uint8_t*)hob + sizeof(EFI_HOB_GUID_TYPE))
 #define GET_GUID_HOB_DATA_SIZE(hob) (uint16_t)(GET_HOB_LENGTH(hob) - sizeof(EFI_HOB_GUID_TYPE))
 
+/* this function is used in very early boot stages when Address Sanitizer is not yet initialized */
+__attribute_no_sanitize_address
 static inline bool HOB_GUID_EQUAL(const EFI_GUID* guid1, const EFI_GUID* guid2) {
   uint64_t guid1_low  = *((const uint64_t*)guid1);
   uint64_t guid2_low  = *((const uint64_t*)guid2);

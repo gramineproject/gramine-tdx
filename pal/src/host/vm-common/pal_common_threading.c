@@ -135,6 +135,7 @@ uintptr_t get_gs_base(struct thread* next_thread) {
  * terminating, a TCB in the GS register is meaningless, but GCC's stack protector will look for a
  * canary at gs:[0x8], so let's install a dummy TCB inside GS with a default canary */
 __attribute_no_stack_protector
+__attribute_no_sanitize_address
 void set_dummy_gs_base(void) {
     wrmsr(MSR_IA32_GS_BASE, (uintptr_t)&g_dummy_tcb);
 }

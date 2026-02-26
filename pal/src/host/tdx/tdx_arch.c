@@ -1,9 +1,16 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 /* Copyright (C) 2023 Intel Corporation */
 
+/*
+ * MSR, MMIO and IO-ports functions may be used in very early boot stages when Address Sanitizer is
+ * not yet initialized, and thus they must be marked with `__attribute_no_sanitize_address`.
+ */
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "api.h"
 
 #include "tdx_arch.h"
 
@@ -46,6 +53,7 @@ long tdx_vmcall_instr_hlt(bool interrupt_blocked) {
     return 0;
 }
 
+__attribute_no_sanitize_address
 long tdx_vmcall_instr_io(uint64_t access_size, uint64_t direction, uint64_t ioport,
                          uint64_t* data) {
     struct tdx_tdcall_regs regs = {.rax = TDG_VP_VMCALL,
@@ -68,6 +76,7 @@ long tdx_vmcall_instr_io(uint64_t access_size, uint64_t direction, uint64_t iopo
     return 0;
 }
 
+__attribute_no_sanitize_address
 long tdx_vmcall_instr_rdmsr(uint64_t msr_index, uint64_t* out_msr_value) {
     struct tdx_tdcall_regs regs = {.rax = TDG_VP_VMCALL,
                                    .rcx = 0x1c00, /* pass only R10-R12 to host */
@@ -85,6 +94,7 @@ long tdx_vmcall_instr_rdmsr(uint64_t msr_index, uint64_t* out_msr_value) {
     return 0;
 }
 
+__attribute_no_sanitize_address
 long tdx_vmcall_instr_wrmsr(uint64_t msr_index, uint64_t msr_value) {
     struct tdx_tdcall_regs regs = {.rax = TDG_VP_VMCALL,
                                    .rcx = 0x3c00, /* pass only R10-R13 to host */
@@ -101,6 +111,7 @@ long tdx_vmcall_instr_wrmsr(uint64_t msr_index, uint64_t msr_value) {
     return 0;
 }
 
+__attribute_no_sanitize_address
 long tdx_vmcall_ve_reqmmio(uint64_t access_size, uint64_t direction, void* mmio_addr,
                            uint64_t* data) {
     struct tdx_tdcall_regs regs = {.rax = TDG_VP_VMCALL,

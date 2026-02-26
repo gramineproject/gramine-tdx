@@ -10,6 +10,7 @@
 
 #include "api.h"
 #include "cpu.h"
+#include "init.h"
 #include "crypto.h"
 #include "list.h"
 #include "pal.h"
@@ -197,7 +198,8 @@ noreturn int pal_start_continue(void* cmdline_);
  *   - RDI: holds the payload HOB address
  *   - RSI: holds the address where the payload is loaded
  */
-__attribute_no_stack_protector
+__attribute_no_stack_protector  /* starts with zero GS base register */
+__attribute_no_sanitize_address /* starts with dummy page tables w/o ASan shared memory */
 noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     __UNUSED(this_addr);
 
@@ -208,24 +210,6 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     /* initialize alloc_align as early as possible, a lot of PAL APIs depend on this being set */
     g_pal_public_state.alloc_align = PAGE_SIZE;
     assert(IS_POWER_OF_2(g_pal_public_state.alloc_align));
-
-    uint8_t gpaw_unused;
-    uint64_t attributes_unused;
-    uint32_t max_cpus_unused;
-    bool sys_rd_available_unused;
-    uint32_t num_cpus;
-    uint32_t cpu_index;
-    long tdx_ret = tdx_tdcall_vp_info(&gpaw_unused, &attributes_unused, &num_cpus, &max_cpus_unused,
-                                      &cpu_index, &sys_rd_available_unused);
-    if (tdx_ret)
-        INIT_FAIL("Could not call TDCALL[TDG.VP.INFO]");
-
-    if (cpu_index != 0)
-        INIT_FAIL("Expected CPU with ID = 0 (BSP), but got ID = %u", cpu_index);
-
-    if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
-        INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
-                  MAX_NUM_CPUS);
 
     uint64_t gpa_width = 0;
     for (EFI_HOB_GENERIC_HEADER* hob = hob_addr; !END_OF_HOB_LIST(hob); hob = GET_NEXT_HOB(hob)) {
@@ -285,6 +269,8 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     if (ret < 0)
         INIT_FAIL("Failed to initialize shared TDX memory");
 
+    call_init_array();
+
     init_slab_mgr();
 
     /* must be before apic_init() since the latter uses RDTSC */
@@ -311,6 +297,27 @@ noreturn void pal_start_c(void* hob_addr, void* this_addr) {
     ret = syscalls_init();
     if (ret < 0)
         INIT_FAIL("Failed to initialize system call handling");
+
+    /* learn number of CPUs and current CPU's index (we do it here and not at beginning of function
+     * because otherwise ASan-enabled build fails on tdx_tdcall_vp_info() for complicated
+     * builtin-memset reasons), see https://forums.raspberrypi.com/viewtopic.php?t=219687 */
+    uint8_t gpaw_unused;
+    uint64_t attributes_unused;
+    uint32_t max_cpus_unused;
+    bool sys_rd_available_unused;
+    uint32_t num_cpus;
+    uint32_t cpu_index;
+    long tdx_ret = tdx_tdcall_vp_info(&gpaw_unused, &attributes_unused, &num_cpus, &max_cpus_unused,
+                                      &cpu_index, &sys_rd_available_unused);
+    if (tdx_ret)
+        INIT_FAIL("Could not call TDCALL[TDG.VP.INFO]");
+
+    if (cpu_index != 0)
+        INIT_FAIL("Expected CPU with ID = 0 (BSP), but got ID = %u", cpu_index);
+
+    if (num_cpus < 1 || num_cpus > MAX_NUM_CPUS)
+        INIT_FAIL("Detected unsupported number of virtual CPUs: %u (supported: 1..%u)", num_cpus,
+                  MAX_NUM_CPUS);
 
     /* must be called before interrupts_init() because it allocates interrupt stacks/XSAVE areas */
     ret = init_multicore_prepare(num_cpus);
