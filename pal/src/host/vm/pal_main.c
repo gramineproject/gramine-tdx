@@ -233,7 +233,7 @@ noreturn int pal_start_continue(void* cmdline_) {
 
     /* relocate PAL */
     set_pal_binary_name("pal");
-    ret = setup_pal_binary();
+    ret = setup_pal_binary(/*apply_relocations=*/true);
     if (ret < 0)
         INIT_FAIL("Relocation of the PAL binary failed");
 
