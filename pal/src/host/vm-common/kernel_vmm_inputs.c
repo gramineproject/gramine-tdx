@@ -14,6 +14,7 @@
 #include "api.h"
 #include "pal_error.h"
 
+#include "kernel_memory.h"
 #include "kernel_time.h"
 #include "kernel_vmm_inputs.h"
 #include "vm_callbacks.h"
@@ -127,8 +128,9 @@ int cmdline_read_gramine_envs(const char* envs, int* out_envp_cnt, const char** 
     return cmdline_read_common(CMDLINE_ENVS, envs, out_envp_cnt, out_envp);
 }
 
-static uint16_t find_fw_cfg_selector(const char* fw_cfg_name) {
-	uint32_t fw_cfg_files_count = 0;
+static int find_fw_cfg_selector(const char* fw_cfg_name, uint16_t* out_selector,
+                                uint32_t* out_size) {
+    uint32_t fw_cfg_files_count = 0;
     uint8_t* fw_cfg_files_count_raw = (uint8_t*)&fw_cfg_files_count;
     vm_portio_writew(FW_CFG_PORT_SEL, FW_CFG_FILE_DIR);
     for (size_t i = 0; i < sizeof(fw_cfg_files_count); i++)
@@ -137,9 +139,10 @@ static uint16_t find_fw_cfg_selector(const char* fw_cfg_name) {
     /* QEMU provides in big-endian, but our x86-64 CPU is little-endian */
     fw_cfg_files_count = __builtin_bswap32(fw_cfg_files_count);
     if (fw_cfg_files_count > MAX_FW_CFG_FILES)
-        return 0;
+        return -PAL_ERROR_INVAL;
 
     uint16_t fw_cfg_selector = 0;
+    uint32_t fw_cfg_size = 0;
     for (size_t i = 0; i < fw_cfg_files_count; i++) {
         struct FWCfgFile fw_cfg_file;
         uint8_t* fw_cfg_file_raw = (uint8_t*)&fw_cfg_file;
@@ -148,27 +151,38 @@ static uint16_t find_fw_cfg_selector(const char* fw_cfg_name) {
 
         if (strlen(fw_cfg_name) + 1 > sizeof(fw_cfg_file.name)) {
             /* make sure the searched-for string is less than the fw_cfg file name limit (56) */
-            return 0;
+            return -PAL_ERROR_INVAL;
         }
 
         if (strcmp(fw_cfg_file.name, fw_cfg_name) == 0) {
             fw_cfg_selector = fw_cfg_file.select;
+            fw_cfg_size = fw_cfg_file.size;
             break;
         }
     }
 
-    return __builtin_bswap16(fw_cfg_selector);
+    if (!fw_cfg_selector || !fw_cfg_size)
+        return -PAL_ERROR_INVAL;
+
+    *out_selector = __builtin_bswap16(fw_cfg_selector);
+    *out_size = __builtin_bswap32(fw_cfg_size);
+    return 0;
 }
 
 int cmdline_init_args(char* cmdline_args, size_t cmdline_args_size) {
     memset(cmdline_args, 0, cmdline_args_size);
 
-    uint16_t fw_cfg_selector = find_fw_cfg_selector("opt/gramine/args");
-    if (!fw_cfg_selector)
+    uint16_t fw_cfg_selector;
+    uint32_t fw_cfg_size;
+    int ret = find_fw_cfg_selector("opt/gramine/args", &fw_cfg_selector, &fw_cfg_size);
+    if (ret < 0)
+        return ret;
+
+    if (fw_cfg_size >= cmdline_args_size)
         return -PAL_ERROR_INVAL;
 
     vm_portio_writew(FW_CFG_PORT_SEL, fw_cfg_selector);
-    for (size_t i = 0; i < cmdline_args_size - 1; i++)
+    for (size_t i = 0; i < fw_cfg_size; i++)
         cmdline_args[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
 
     uint32_t cmdline_args_len = strlen(cmdline_args);
@@ -182,12 +196,17 @@ int cmdline_init_args(char* cmdline_args, size_t cmdline_args_size) {
 int cmdline_init_envs(char* cmdline_envs, size_t cmdline_envs_size) {
     memset(cmdline_envs, 0, cmdline_envs_size);
 
-    uint16_t fw_cfg_selector = find_fw_cfg_selector("opt/gramine/envs");
-    if (!fw_cfg_selector)
+    uint16_t fw_cfg_selector;
+    uint32_t fw_cfg_size;
+    int ret = find_fw_cfg_selector("opt/gramine/envs", &fw_cfg_selector, &fw_cfg_size);
+    if (ret < 0)
+        return ret;
+
+    if (fw_cfg_size >= cmdline_envs_size)
         return -PAL_ERROR_INVAL;
 
     vm_portio_writew(FW_CFG_PORT_SEL, fw_cfg_selector);
-    for (size_t i = 0; i < cmdline_envs_size - 1; i++)
+    for (size_t i = 0; i < fw_cfg_size; i++)
         cmdline_envs[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
 
     uint32_t cmdline_envs_len = strlen(cmdline_envs);
@@ -199,12 +218,17 @@ int cmdline_init_envs(char* cmdline_envs, size_t cmdline_envs_size) {
 }
 
 int host_pwd_init(void) {
-    uint16_t fw_cfg_selector = find_fw_cfg_selector("opt/gramine/pwd");
-    if (!fw_cfg_selector)
+    uint16_t fw_cfg_selector;
+    uint32_t fw_cfg_size;
+    int ret = find_fw_cfg_selector("opt/gramine/pwd", &fw_cfg_selector, &fw_cfg_size);
+    if (ret < 0)
+        return ret;
+
+    if (fw_cfg_size >= sizeof(g_host_pwd))
         return -PAL_ERROR_INVAL;
 
     vm_portio_writew(FW_CFG_PORT_SEL, fw_cfg_selector);
-    for (size_t i = 0; i < sizeof(g_host_pwd) - 1; i++)
+    for (size_t i = 0; i < fw_cfg_size; i++)
         g_host_pwd[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
 
     uint32_t len = strlen(g_host_pwd);
@@ -218,12 +242,17 @@ int host_pwd_init(void) {
 int unixtime_init(char* unixtime_s, size_t unixtime_size) {
     memset(unixtime_s, 0, unixtime_size);
 
-    uint16_t fw_cfg_selector = find_fw_cfg_selector("opt/gramine/unixtime_s");
-    if (!fw_cfg_selector)
+    uint16_t fw_cfg_selector;
+    uint32_t fw_cfg_size;
+    int ret = find_fw_cfg_selector("opt/gramine/unixtime_s", &fw_cfg_selector, &fw_cfg_size);
+    if (ret < 0)
+        return ret;
+
+    if (fw_cfg_size >= unixtime_size)
         return -PAL_ERROR_INVAL;
 
     vm_portio_writew(FW_CFG_PORT_SEL, fw_cfg_selector);
-    for (size_t i = 0; i < unixtime_size - 1; i++)
+    for (size_t i = 0; i < fw_cfg_size; i++)
         unixtime_s[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
 
     uint32_t len = strlen(unixtime_s);
@@ -231,5 +260,26 @@ int unixtime_init(char* unixtime_s, size_t unixtime_size) {
         return -PAL_ERROR_INVAL;
 
     /* note that `unixtime_s` is guaranteed to be NULL terminated and have at least one symbol */
+    return 0;
+}
+
+/* this func is used only in VM PAL (not in TDX PAL), so doesn't need to be hardened */
+int e820_table_init(char* e820_table, size_t* e820_size, size_t max_e820_size) {
+    memset(e820_table, 0, max_e820_size);
+
+    uint16_t fw_cfg_selector;
+    uint32_t fw_cfg_size;
+    int ret = find_fw_cfg_selector("etc/e820", &fw_cfg_selector, &fw_cfg_size);
+    if (ret < 0)
+        return ret;
+
+    if (fw_cfg_size > max_e820_size)
+        return -PAL_ERROR_INVAL;
+
+    vm_portio_writew(FW_CFG_PORT_SEL, fw_cfg_selector);
+    for (size_t i = 0; i < fw_cfg_size; i++)
+        e820_table[i] = vm_portio_readb(FW_CFG_PORT_SEL + 1);
+
+    *e820_size = fw_cfg_size;
     return 0;
 }
