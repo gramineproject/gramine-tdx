@@ -135,6 +135,15 @@ struct virtio_vsock_connection {
     uint32_t prepared_for_user;
     uint32_t consumed_by_user;
 
+    /* per-connection (per-socket) buffer space management: guest side, not used currently */
+    uint32_t tx_cnt;         /* free-running counter: bytes transmitted to host */
+    uint32_t peer_fwd_cnt;   /* free-running counter: bytes received by host */
+    uint32_t peer_buf_alloc; /* buffer space for this connection on host */
+
+    /* per-connection (per-socket) buffer space management: host side, must inform host */
+    uint32_t fwd_cnt;        /* free-running counter: bytes received by this guest */
+    uint32_t buf_alloc;      /* buffer space for this connection on this guest */
+
     /* receive/send is disallowed on this connection (depends on received SHUTDOWN requests) */
     bool recv_disallowed;
     bool send_disallowed;

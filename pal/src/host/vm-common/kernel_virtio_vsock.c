@@ -7,7 +7,8 @@
  * Reference: https://docs.oasis-open.org/virtio/virtio/v1.1/csprd01/virtio-v1.1-csprd01.pdf
  *
  * TODO:
- * - Buffer space management via buf_alloc, fwd_cnt, tx_cnt (see section 5.10.6.3 in spec)
+ * - Implement guest-side buffer space management via peer_buf_alloc, peer_fwd_cnt, tx_cnt
+ *   (see section 5.10.6.3 in spec)
  *
  * Diagram with flows:
  *
@@ -249,8 +250,6 @@ static void copy_into_tq_internal(struct virtio_vsock_packet* packet, uint64_t p
 
     vm_shared_writew(&g_vsock->tq->avail->ring[avail_idx % g_vsock->tq->queue_size], desc_idx);
     vm_shared_writew(&g_vsock->tq->avail->idx, g_vsock->tq->cached_avail_idx);
-
-    g_vsock->tx_cnt += packet->header.size;
 
     uint16_t host_device_used_flags = vm_shared_readw(&g_vsock->tq->used->flags);
     if (!(host_device_used_flags & VIRTQ_USED_F_NO_NOTIFY))
@@ -575,6 +574,9 @@ static struct virtio_vsock_connection* create_connection(uint64_t host_port, uin
     conn->host_port  = host_port;
     conn->guest_port = guest_port;
 
+    conn->fwd_cnt   = 0;
+    conn->buf_alloc = VSOCK_MAX_PACKETS * VSOCK_MAX_PAYLOAD_SIZE;
+
     if (attach_connection(conn) < 0) {
         free(conn);
         return NULL;
@@ -616,8 +618,8 @@ static struct virtio_vsock_packet* generate_packet(struct virtio_vsock_connectio
     packet->header.op    = op;
     packet->header.flags = flags;
 
-    packet->header.buf_alloc = g_vsock->buf_alloc;
-    packet->header.fwd_cnt   = __atomic_load_n(&g_vsock->fwd_cnt, __ATOMIC_ACQUIRE);
+    packet->header.buf_alloc = conn->buf_alloc;
+    packet->header.fwd_cnt   = conn->fwd_cnt;
 
     packet->header.size = payload_size;
     memcpy(packet->payload, payload, payload_size);
@@ -649,8 +651,9 @@ static int neglect_packet(struct virtio_vsock_packet* in) {
     packet->header.op    = VIRTIO_VSOCK_OP_RST;
     packet->header.flags = 0;
 
-    packet->header.buf_alloc = g_vsock->buf_alloc;
-    packet->header.fwd_cnt   = __atomic_load_n(&g_vsock->fwd_cnt, __ATOMIC_ACQUIRE);
+    /* buffer-management fields are useless in RST packets, so zero out */
+    packet->header.buf_alloc = 0;
+    packet->header.fwd_cnt   = 0;
 
     packet->header.size = 0;
 
@@ -759,8 +762,7 @@ static int recv_rw_packet(struct virtio_vsock_connection* conn,
     conn->packets_for_user[idx] = packet; /* packet is now owned by conn */
     conn->prepared_for_user++;
 
-    __atomic_add_fetch(&g_vsock->msg_cnt, 1, __ATOMIC_ACQ_REL);
-    __atomic_add_fetch(&g_vsock->fwd_cnt, packet->header.size, __ATOMIC_ACQ_REL);
+    conn->fwd_cnt += packet->header.size;
     return 0;
 }
 
@@ -832,8 +834,8 @@ static int process_packet(struct virtio_vsock_packet* packet) {
         goto out;
     }
 
-    g_vsock->peer_fwd_cnt   = packet->header.fwd_cnt;
-    g_vsock->peer_buf_alloc = packet->header.buf_alloc;
+    conn->peer_fwd_cnt   = packet->header.fwd_cnt;
+    conn->peer_buf_alloc = packet->header.buf_alloc;
 
     switch (conn->state) {
         case VIRTIO_VSOCK_LISTEN:
@@ -1160,9 +1162,6 @@ int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_conf
     }
 
     vsock->host_cid  = VSOCK_HOST_CID;
-    vsock->tx_cnt    = 0;
-    vsock->fwd_cnt   = 0;
-    vsock->buf_alloc = VSOCK_MAX_PACKETS * sizeof(struct virtio_vsock_packet);
 
     vsock->conns_size  = VIRTIO_VSOCK_CONNS_INIT_SIZE;
     vsock->conns       = conns;
