@@ -6,6 +6,8 @@ elif sgx
     libpal = libpal_sgx_dep
 elif vm
     libpal = libpal_vm_dep
+elif tdx
+    libpal = libpal_tdx_dep
 else
     error('need to link tests against a PAL library, but no PAL version is enabled')
 endif
