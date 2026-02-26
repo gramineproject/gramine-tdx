@@ -298,15 +298,9 @@ bool virtio_vsock_can_write(void) {
 
 /* called from the bottomhalf thread in normal context (not interrupt context) */
 int virtio_vsock_bottomhalf(void) {
-    int ret = handle_rq();
-    if (ret < 0)
-        return ret;
-
-    ret = cleanup_tq();
-    if (ret < 0)
-        return ret;
-
-    return 0;
+    int handle_rq_ret = handle_rq();
+    int cleanup_tq_ret = cleanup_tq();
+    return handle_rq_ret ? handle_rq_ret : cleanup_tq_ret;
 }
 
 static int enlarge_conns(uint32_t new_size) {
