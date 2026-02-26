@@ -88,6 +88,7 @@ noreturn void thread_free_stack_and_die(void* thread_stack, int* clear_child_tid
 
     /* we might still be using the stack we just marked as unused until we enter the asm mode,
      * so we do not unlock now but rather when another thread is scheduled */
+    set_dummy_gs_base();
     sched_thread(&g_thread_stack_lock.lock, clear_child_tid);
     __builtin_unreachable();
 }

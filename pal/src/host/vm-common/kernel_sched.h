@@ -28,10 +28,12 @@ static_assert(MAX_NUM_CPUS % BITS_IN_TYPE(unsigned long) == 0, "");
 
 extern bool g_kick_sched_thread;
 
-/* the two helper functions are implemented in pal_common_threading.c which knows about the
+/* the four helper functions are implemented in pal_common_threading.c which knows about the
  * relationship between the TCB (which is pointed to by GS base reg) and the thread struct */
 struct thread* get_thread_ptr(uintptr_t curr_gs_base);
 uintptr_t get_gs_base(struct thread* next_thread);
+void set_dummy_gs_base(void);
+uintptr_t replace_with_null_if_dummy_gs_base(uintptr_t gs_base);
 
 void sched_thread_uninterruptable(struct isr_regs* userland_regs);
 void sched_thread(uint32_t* lock_to_unlock, int* clear_child_tid);
