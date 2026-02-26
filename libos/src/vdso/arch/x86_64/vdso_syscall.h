@@ -10,6 +10,20 @@
 #error This code should be compiled without AddressSanitizer.
 #endif
 
+#ifdef VDSO_USE_SYSCALL_INSTR
+static inline long vdso_arch_syscall(long nr, long arg1, long arg2) {
+    long ret;
+    __asm__ volatile(
+        "lea .Lret%=(%%rip), %%rcx\n"
+        "syscall\n"
+        ".Lret%=:\n"
+        : "=a" (ret)
+        : "0" (nr), "D"(arg1), "S"(arg2)
+        : "memory", "rcx", "r11"
+    );
+    return ret;
+}
+#else
 static inline long vdso_arch_syscall(long nr, long arg1, long arg2) {
     long ret;
     __asm__ volatile(
@@ -22,3 +36,4 @@ static inline long vdso_arch_syscall(long nr, long arg1, long arg2) {
     );
     return ret;
 }
+#endif
