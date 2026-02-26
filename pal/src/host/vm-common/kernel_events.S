@@ -138,7 +138,14 @@ jump_into_user_mode:
 // FIXME: ideally must add swapgs in the very beginning, but GS is not used by ring-3 anyway
 syscall_asm:
     mov     %rcx, %gs:PAL_TCB_VM_USER_RIP
+    cmp     $SYSCALL_RT_SIGRETURN, %rax
+    je      .Linstall_rt_sigreturn_path
+.Linstall_sysret_path:
     lea     sysret_asm(%rip), %rcx
+    jmp     .Lsyscall_libos
+.Linstall_rt_sigreturn_path:
+    lea     sigreturn_asm(%rip), %rcx
+.Lsyscall_libos:
     jmp     *%gs:(PAL_TCB_LIBOS + 0x8)      // `libos_syscall_entry` addr is at offset 0x8
 
 // FIXME: ideally must add swapgs right-before sysretq, but GS is not used by ring-3 anyway
@@ -146,6 +153,34 @@ sysret_asm:
     mov     %gs:PAL_TCB_VM_USER_RIP, %rcx
     or      $0x200, %r11                    // userland RFLAGS will contain IF
     sysretq
+
+// FIXME: ideally must add swapgs right-before sysretq, but GS is not used by ring-3 anyway
+sigreturn_asm:
+    // memorize user RSP because need to switch to pseudo stack for iretq
+    mov     %rsp, %gs:PAL_TCB_VM_SIGRETURN_USER_RSP
+    // memorize user RAX because need one temporary register to push values to pseudo stack
+    mov     %rax, %gs:PAL_TCB_VM_SIGRETURN_USER_RAX
+
+    mov     %gs:PAL_TCB_VM_SIGRETURN_PSEUDO_RSP, %rsp
+    // push SS: 64-bit user data
+    pushq   $0x23 // SS segment selector: Index=100 (4), GDT, RPL=11
+    // push user RSP
+    mov     %gs:PAL_TCB_VM_SIGRETURN_USER_RSP, %rax
+    push    %rax
+    // push user RFLAGS; make sure it contains IF
+    pushfq
+    pop     %rax
+    or      $0x200, %rax
+    push    %rax
+    // push CS: 64-bit user code
+    pushq   $0x2b // CS segment selector: Index=101 (5), GDT, RPL=11
+    // push user RIP
+    mov     %gs:PAL_TCB_VM_USER_RIP, %rax
+    push    %rax
+    // RSP will be restored by iretq, but RAX we must restore manually
+    mov     %gs:PAL_TCB_VM_SIGRETURN_USER_RAX, %rax
+    // jump to user context
+    iretq
 
 
     // void save_context_and_restore_next(uint64_t curr_gs_base, uint64_t next_gs_base,

@@ -146,6 +146,11 @@ void thread_setup(struct thread* thread, void* fpregs, void* stack, int (*callba
 
     thread->context.rsp -= 8; /* x86-64 calling convention: must be 8-odd at entry */
 
+    /* sigreturn_pseudo_rsp always points at the top of the pseudo stack used in sigreturn flow;
+     * see also kernel_events.S */
+    thread->sigreturn_pseudo_rsp = (uint64_t)&thread->sigreturn_pseudo_stack;
+    thread->sigreturn_pseudo_rsp += sizeof(thread->sigreturn_pseudo_stack);
+
     static uint32_t thread_id = 0;
     thread->thread_id = __atomic_add_fetch(&thread_id, 1, __ATOMIC_SEQ_CST);
 
