@@ -12,6 +12,7 @@
 
 #include "kernel_apic.h"
 #include "kernel_interrupts.h"
+#include "kernel_memory.h"
 #include "kernel_pci.h"
 #include "kernel_sched.h"
 #include "kernel_time.h"
@@ -54,6 +55,37 @@ void isr_c(struct isr_regs* regs) {
     uint64_t kernel_cs = (uint64_t)(gdt_entry_kernel_cs - gdt_start);
 
     switch (regs->int_number) {
+        case 14:
+            /* Page faults can happen only because the page is not present (P bit is cleared in the
+             * corresponding PTE), see also PalVirtualMemoryAlloc() logic */
+            if ((regs->error_code & /*present bit*/1UL) != 0) {
+                log_error("Panic: #PF triggered on present page (flags 0x%lx)", regs->error_code);
+                triple_fault();
+            }
+            uint64_t faulted_addr;
+            __asm__ volatile("mov %%cr2, %%rax" : "=a"(faulted_addr));
+            faulted_addr &= ~0xFFFUL;
+
+            uint64_t* pte_addr;
+            ret = memory_find_page_table_entry(faulted_addr, &pte_addr);
+            if (ret < 0) {
+                log_error("Panic: #PF handler failed (cannot find PTE for 0x%lx)", faulted_addr);
+                triple_fault();
+            }
+
+            /* We use ignored-by-hardware bit 9 to signify "needs memset-to-zero", as a perf
+             * optimization. On VM boot (see kernel_memory.c), all memory pages are zeroed out so
+             * they don't need an additional memset-to-zero (and all PTEs have bit 9 equal to 0).
+             * We must also set the present bit (bit 0) always. */
+            if ((*pte_addr & (1UL << 9)) == 0) {
+                *pte_addr |= 1UL << 9 | 1UL;
+                invlpg(faulted_addr);
+            } else {
+                *pte_addr |= 1UL;
+                invlpg(faulted_addr);
+                memset((void*)faulted_addr, 0, 0x1000);
+            }
+            break;
         case 20:
             ret = vm_virtualization_exception(regs);
             if (ret < 0) {
@@ -98,7 +130,7 @@ void isr_c(struct isr_regs* regs) {
 static int idt_gate_set(uint8_t isr_number, void* isr_addr) {
     /* selector, ist offset, flags, reserved bits are filled by *.S, check them here */
     if (g_idt[isr_number].code_selector == 0 ||
-            g_idt[isr_number].ist_offset != 0 ||
+            g_idt[isr_number].ist_offset != 1 ||
             g_idt[isr_number].flags != 0x8E ||
             g_idt[isr_number]._reserved != 0) {
         return -PAL_ERROR_INVAL;
@@ -119,9 +151,9 @@ static int tss_init(void) {
 
     /* *.S must have initialized TSS already, check it */
     struct tss_64bitmode* tss = tss_64bitmode;
-    if (tss->rsp0 == 0 || tss->rsp1_unused != 0 || tss->rsp2_unused != 0)
+    if (tss->rsp0_unused != 0 || tss->rsp1_unused != 0 || tss->rsp2_unused != 0)
         return -PAL_ERROR_BADADDR;
-    if (tss->ist1_unused != 0)
+    if (tss->ist1 == 0)
         return -PAL_ERROR_BADADDR;
     if (tss->iomap_base_unused != sizeof(*tss))
         return -PAL_ERROR_BADADDR;
@@ -269,5 +301,7 @@ int interrupts_init(void) {
     /* flush TSS and enable interrupts */
     ltr((char*)tss_64bitmode_desc - gdt_start);
     sti();
+
+    g_enable_lazy_memory_alloc = true;
     return 0;
 }
