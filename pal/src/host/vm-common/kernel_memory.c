@@ -95,6 +95,26 @@ int memory_mark_pages_present(uint64_t addr, size_t size, bool present) {
     return 0;
 }
 
+int memory_mark_pages_strong_uncacheable(uint64_t addr, size_t size, bool mark) {
+    uint64_t mark_addr = addr;
+    while (mark_addr < addr + size) {
+        uint64_t* pte_addr;
+        int ret = memory_find_page_table_entry(mark_addr, &pte_addr);
+        if (ret < 0)
+            return ret;
+
+        /* set or clear bit 4 (PCD = Page-level cache disable) */
+        if (mark)
+            *pte_addr |= 1UL << 4;
+        else
+            *pte_addr &= ~(1UL << 4);
+        invlpg(mark_addr);
+
+        mark_addr += 4096;
+    }
+    return 0;
+}
+
 /* sets up the new page tables hierarchy (with 4KB pages) to cover memory range [0x0, memory_size);
  * page tables have 1:1 virtual-to-physical address translation */
 static int pagetables_init(size_t memory_size, uint64_t page_tables_addr, size_t page_tables_size,

@@ -22,8 +22,8 @@
 - Paging: flat single shared address space, no switching, all pages always
   present and RWX, 4KB pages (no huge tables)
 
-- Time source: RDTSC (Invariant TSC) for relative time; no absolute time (simply
-  starts with the Unix epoch `0`)
+- Time source: RDTSC (Invariant TSC) for relative time; absolute time is taken
+  from the host on QEMU startup
 
 - Timer interrupts: using TSC deadline mode, fired every 100us
 
@@ -49,8 +49,8 @@
   - stdin supports only non-interactive mode (input is assumed to be supplied
     from e.g. a file)
 
-- Files: single shared directory, uses virtio-fs driver
-  (on the host side, run `virtiofsd --shared-dir /`)
+- Files: shared root directory, uses virtio-fs driver
+  - on the host side, Gramine starts `virtiofsd --shared-dir /`
 
 - Networking: uses virtio-vsock driver
   - may need to load the Linux kernel module: `sudo modprobe vhost_vsock`
