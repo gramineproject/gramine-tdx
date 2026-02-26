@@ -60,14 +60,12 @@ struct virtio_fs* g_fs = NULL;
  *
  * Multi-core support is unscalable: there is a single lock that effectively serializes all FS
  * operations. Moreover, once an FS operation is started, there will be no progress until it
- * finishes (i.e. until the device populates the responses, sends a HW interrupt, this interrupt is
- * caught by the ISR and the thread is unblocked on `device_done` variable). There are two
- * scalability bottlenecks:
+ * finishes (i.e. until the device populates the responses). There are two scalability bottlenecks:
  *   - All threads that perform FS operations are serialized on a single lock.
- *   - Each thread spins on `device_done` until the device signals that it's done via an interrupt.
+ *   - Each thread spins on `requests->used->idx` until the device signals that it's done.
  *
  * To make the FS implementation scalable, we could (1) allocate as many request virtqueues as there
- * are CPUs, and (2) put threads to sleep instead of spinning on `device_done`.
+ * are CPUs, and (2) put threads to sleep instead of spinning on `requests->used->idx`.
  *
  * For now we assume that FS operations are sufficiently rare and typically single-threaded, so we
  * don't optimize for scalability.
@@ -87,30 +85,7 @@ int virtio_fs_isr(void) {
     if (!g_fs)
         return 0;
 
-    uint32_t interrupt_status = vm_mmio_readl(g_fs->interrupt_status_reg);
-    if (!WITHIN_MASK(interrupt_status, VIRTIO_INTERRUPT_STATUS_MASK)) {
-        log_error("Panic: ISR status register has reserved bits set (0x%x)", interrupt_status);
-        triple_fault();
-    }
-
-    if (interrupt_status & VIRTIO_INTERRUPT_STATUS_USED) {
-        uint16_t host_used_idx = vm_shared_readw(&g_fs->requests->used->idx);
-
-        uint16_t expected_used_idx = g_fs->requests->seen_used + 1; /* also works for int wrap */
-        if (host_used_idx != expected_used_idx)
-            goto out;
-
-        /* it is an actual change in "used" ring (not a spurious one), memoize it and kick the
-         * waiting thread that issued the request */
-        g_fs->requests->seen_used = host_used_idx;
-        __atomic_store_n(&g_fs->device_done, true, __ATOMIC_RELEASE);
-    }
-
-    if (interrupt_status & VIRTIO_INTERRUPT_STATUS_CONFIG) {
-        /* we don't currently care about changes in device config, so noop */
-    }
-
-out:
+    /* this interrupt handler is dummy, because our FS implementation uses busy poll */
     return 0;
 }
 
@@ -144,14 +119,6 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
         }
     }
 
-    if (__atomic_load_n(&g_fs->device_done, __ATOMIC_ACQUIRE)) {
-        /* sanity check: must not happen because all FS operations are synced on a global lock and
-         * interrupt routines never send FS requests -- i.e. only one kernel-thread context can send
-         * FS request at a time */
-        ret = -PAL_ERROR_DENIED;
-        goto out;
-    }
-
     size_t total_in_size  = 0;
     size_t total_out_size = 0;
     for (size_t i = 0; i < count; i++) {
@@ -166,9 +133,6 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
         ret = -PAL_ERROR_NOMEM;
         goto out;
     }
-
-    /* we spin on device_done (until it becomes true) to wait for the device notification */
-    __atomic_store_n(&g_fs->device_done, false, __ATOMIC_RELEASE);
 
     hdr_in->len = total_in_size;
 
@@ -205,10 +169,16 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
                      descs[0].idx);
     vm_shared_writew(&g_fs->requests->avail->idx, g_fs->requests->cached_avail_idx);
 
-	vm_mmio_writew(g_fs->requests_notify_addr, /*queue_sel=*/1);
+    uint16_t host_device_used_flags = vm_shared_readw(&g_fs->requests->used->flags);
+    if (!(host_device_used_flags & VIRTQ_USED_F_NO_NOTIFY))
+        vm_mmio_writew(g_fs->requests_notify_addr, /*queue_sel=*/1);
 
-    while (__atomic_load_n(&g_fs->device_done, __ATOMIC_ACQUIRE) != true) {
-        /* FIXME: simply spinning until the VMM processes the request; maybe we could use MWAIT? */
+    while (true) {
+        uint16_t host_used_idx = vm_shared_readw(&g_fs->requests->used->idx);
+        if (host_used_idx == g_fs->requests->cached_avail_idx)
+            break;
+
+        /* FIXME: simply spinning until the VMM processes the request; maybe use MWAIT?  */
         CPU_RELAX();
     }
 
@@ -221,7 +191,6 @@ static int virtio_fs_exec_request(size_t count, struct virtio_fs_desc* descs) {
         shared_buf_addr += descs[i].size;
     }
 
-    __atomic_store_n(&g_fs->device_done, false, __ATOMIC_RELEASE); /* reset for next FS request */
     ret = 0;
 out:
     for (size_t i = 0; i < count; i++) {
@@ -872,6 +841,11 @@ static int virtio_fs_alloc(struct virtio_fs** out_fs) {
     ret = virtq_create(VIRTIO_FS_QUEUE_SIZE, &requests);
     if (ret < 0)
         goto fail;
+
+    /* instruct the host to NOT send interrupts on `requests` queue upon consuming messages; we
+     * perform poll instead of waiting for an interrupt, see `virtio_fs_exec_request()` */
+    vm_shared_writew(&requests->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT);
+    vm_shared_writew(&hiprio->avail->flags, VIRTQ_AVAIL_F_NO_INTERRUPT); /* for sanity */
 
     fs->shared_buf = shared_buf;
     fs->hiprio   = hiprio;
