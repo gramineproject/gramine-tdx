@@ -89,6 +89,13 @@ void isr_c(struct isr_regs* regs) {
             /* below code is currently only for diagnostics; we always panic on PFs */
             uint64_t faulted_addr;
             __asm__ volatile("mov %%cr2, %%rax" : "=a"(faulted_addr));
+
+            ret = pal_common_perform_memfault_handling(faulted_addr, regs);
+            if (ret == 0) {
+                /* LibOS successfully handled the memory fault */
+                break;
+            }
+
             faulted_addr &= ~0xFFFUL;
 
             uint64_t* pte_addr;

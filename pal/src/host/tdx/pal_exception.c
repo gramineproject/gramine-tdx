@@ -10,4 +10,4 @@
 #include "pal_error.h"
 #include "pal_internal.h"
 
-/* currently we don't do anything here */
+/* nothing to do here; all logic is in vm-common/pal_common_exception.c */

@@ -116,6 +116,8 @@ static inline noreturn void triple_fault(void) {
 
 extern bool g_interrupts_enabled;
 
+int pal_common_perform_memfault_handling(uint64_t faulted_addr, struct isr_regs* regs);
+
 void isr_c(struct isr_regs* regs);
 int send_invalidate_tlb_ipi_and_wait(void* addr, size_t size, bool invalidate_on_this_cpu);
 int interrupts_init(void);
