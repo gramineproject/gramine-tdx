@@ -94,7 +94,8 @@ void* vm_shared_memset(void* _s, int c, size_t n) {
 void vm_shared_wrmsr(uint64_t msr, uint64_t value) {
     if (msr != MSR_INSECURE_IA32_LAPIC_SPURIOUS_INTERRUPT_VECTOR &&
             msr != MSR_INSECURE_IA32_LAPIC_LVT_TIMER &&
-            msr != MSR_INSECURE_IA32_TSC_DEADLINE) {
+            msr != MSR_INSECURE_IA32_TSC_DEADLINE &&
+            msr != MSR_INSECURE_IA32_LAPIC_ICR) {
         /* not a known insecure MSR */
         BUG();
     }

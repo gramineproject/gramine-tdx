@@ -103,11 +103,10 @@ static int switch_apic_to_x2_mode(void) {
 }
 
 static int add_preloaded_range(uintptr_t addr, size_t size, const char* comment) {
-    /* FIXME: use proper prot flags for preloaded (excluded from memory allocation) ranges? */
     return pal_add_initial_range(addr, size, /*pal_prot=*/0, comment);
 }
 
-static void zero_out_memory(void) {
+static void zero_out_memory_and_prot_none(void) {
     extern struct pal_initial_mem_range g_initial_mem_ranges[];
 
     uint64_t cur_mem_range_idx = 0;
@@ -138,6 +137,7 @@ static void zero_out_memory(void) {
             return;
 
         memset((void*)addr, 0, PAGE_SIZE);
+        (void)memory_mark_pages_off(addr, PAGE_SIZE);
     }
 }
 
@@ -185,13 +185,16 @@ noreturn void pal_start_c(void) {
         INIT_FAIL("Failed to initialize preloaded ranges");
 
     /* PAL binary is located at 1MB and may occupy until 4MB, see pal.lds */
+    /* FIXME: whole PAL binary is RWX because memory_pagetables_init() marked everything as RWX and
+     *        zero_out_memory_and_prot_none() did *not* modify perms for PAL binary memory pages */
     ret = add_preloaded_range(0x100000UL, 0x300000UL, "pal_binary");
     if (ret < 0)
         INIT_FAIL("Failed to preload PAL-binary memory range");
 
     /* Common memory-allocation logic relies on all memory pages to be zeroed out after boot.
-     * This is not true for common hypervisors like QEMU/KVM, so must do it ourselves. */
-    zero_out_memory();
+     * This is not true for common hypervisors like QEMU/KVM, so must do it ourselves. Also,
+     * memory_pagetables_init() marked all pages as RWX, now is good time to revert to NONE. */
+    zero_out_memory_and_prot_none();
 
     init_slab_mgr();
 
@@ -244,6 +247,10 @@ noreturn void pal_start_c(void) {
         INIT_FAIL("Failed to initialize virtio-console driver");
     if (!g_fs)
         INIT_FAIL("Failed to initialize virtio-fs driver");
+
+    ret = memory_tighten_permissions();
+    if (ret < 0)
+        INIT_FAIL("Failed to tighten memory permissions after initialization");
 
     /* read VMM (untrusted) inputs: gramine args, environment variables and host's PWD from fw_cfg
      * QEMU pseudo-device, see also kernel_vmm_inputs.h */
