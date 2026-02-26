@@ -23,12 +23,14 @@ int g_streams_waiting_events_futex;
 
 static int check_pipesrv_handle(struct pal_handle* handle, pal_wait_flags_t events,
                                 pal_wait_flags_t* out_events) {
+    assert(handle->hdr.type == PAL_TYPE_PIPESRV);
+
     pal_wait_flags_t revents = 0;
 
+    spinlock_lock(&g_connecting_pipes_lock);
     if ((events & PAL_WAIT_READ)) {
         bool any_connecting_pipe_found = false;
 
-        spinlock_lock(&g_connecting_pipes_lock);
         struct pal_handle* connecting_pipe = NULL;
         LISTP_FOR_EACH_ENTRY(connecting_pipe, &g_connecting_pipes_list, list) {
             if (strcmp(connecting_pipe->pipe.name, handle->pipe.name) == 0) {
@@ -36,15 +38,12 @@ static int check_pipesrv_handle(struct pal_handle* handle, pal_wait_flags_t even
                 break;
             }
         }
-        spinlock_unlock(&g_connecting_pipes_lock);
 
         if (any_connecting_pipe_found)
             revents |= PAL_WAIT_READ;
     }
-
-    spinlock_lock(&handle->pipe.lock);
-    handle->pipe.waitedfor = (revents == 0);
-    spinlock_unlock(&handle->pipe.lock);
+    handle->pipe.connect_poll_waiting = (revents == 0);
+    spinlock_unlock(&g_connecting_pipes_lock);
 
     *out_events = revents;
     return 0;
@@ -52,36 +51,44 @@ static int check_pipesrv_handle(struct pal_handle* handle, pal_wait_flags_t even
 
 static int check_pipe_handle(struct pal_handle* handle, pal_wait_flags_t events,
                              pal_wait_flags_t* out_events) {
+    assert(handle->hdr.type == PAL_TYPE_PIPECLI || handle->hdr.type == PAL_TYPE_PIPE);
+
+    struct pal_handle_inner_pipe_buf* pipe_buf = handle->pipe.pipe_buf;
+    if (!pipe_buf) {
+        *out_events = 0;
+        return 0;
+    }
+
     pal_wait_flags_t revents = 0;
 
-    spinlock_lock(&handle->pipe.lock);
+    spinlock_lock(&pipe_buf->lock);
 
-    if (!(handle->flags & PAL_HANDLE_FD_READABLE) && !(handle->flags & PAL_HANDLE_FD_WRITABLE)) {
+    if (!pipe_buf->readable && !pipe_buf->writable) {
         /* pipe was shutdown */
-        handle->flags |= PAL_HANDLE_FD_ERROR;
-        revents = PAL_WAIT_ERROR;
+        handle->flags |= PAL_HANDLE_FD_ERROR; /* TODO: maybe PAL_HANDLE_FD_HANG_UP? */
+        revents = PAL_WAIT_ERROR;             /* TODO: maybe PAL_WAIT_HANG_UP? */
         goto out;
     }
 
-    if ((events & PAL_WAIT_READ) && (handle->flags & PAL_HANDLE_FD_READABLE)) {
+    if ((events & PAL_WAIT_READ) && pipe_buf->readable) {
         /* read event requested, and pipe is opened for read... */
-        if (handle->pipe.read_pos != handle->pipe.write_pos) {
+        if (pipe_buf->read_pos != pipe_buf->write_pos) {
             /* ...and there is something to read */
             revents |= PAL_WAIT_READ;
         }
     }
 
-    if ((events & PAL_WAIT_WRITE) && (handle->flags & PAL_HANDLE_FD_WRITABLE)) {
+    if ((events & PAL_WAIT_WRITE) && pipe_buf->writable) {
         /* write event requested, and pipe is opened for write... */
-        if (handle->pipe.write_pos - handle->pipe.read_pos < PIPE_BUF_SIZE) {
+        if (pipe_buf->write_pos - pipe_buf->read_pos < PIPE_BUF_SIZE) {
             /* ...and there is room to write */
             revents |= PAL_WAIT_WRITE;
         }
     }
 
 out:
-    handle->pipe.waitedfor = (revents == 0);
-    spinlock_unlock(&handle->pipe.lock);
+    pipe_buf->poll_waiting = (revents == 0);
+    spinlock_unlock(&pipe_buf->lock);
 
     *out_events = revents;
     return 0;
@@ -122,12 +129,8 @@ static int check_handle(struct pal_handle* handle, pal_wait_flags_t events,
 
     if (handle->hdr.type == PAL_TYPE_PIPESRV) {
         return check_pipesrv_handle(handle, events, out_events);
-    } else if (handle->hdr.type == PAL_TYPE_PIPECLI) {
+    } else if (handle->hdr.type == PAL_TYPE_PIPECLI || handle->hdr.type == PAL_TYPE_PIPE) {
         return check_pipe_handle(handle, events, out_events);
-    } else if (handle->hdr.type == PAL_TYPE_PIPE) {
-        assert(!handle->pipe.buf);
-        assert(handle->pipe.peer);
-        return check_pipe_handle(handle->pipe.peer, events, out_events);
     } else if (handle->hdr.type == PAL_TYPE_SOCKET) {
         return check_socket_handle(handle, events, out_events);
     }
