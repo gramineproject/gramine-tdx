@@ -321,6 +321,7 @@ struct virtio_vsock_config {
  *   - buf_alloc is set at init, no sync required
  *   - tx_cnt is used in copy_into_tq(), sync via transmit-side lock
  *   - conns_size, conns, conns_by_host_port used in many places, sync via connections lock
+ *   - pending_tq_control_packets and co. used during TX, sync via transmit-side lock
  *   - shared_rq_buf is set at init and used during RX, sync via receive-side lock
  *   - shared_tq_buf is set at init and used in copy_into_tq(), sync via transmit-side lock
  *   - rq is used during RX, sync via receive-side lock
@@ -348,8 +349,11 @@ struct virtio_vsock {
 
     uint32_t conns_size;                    /* size of dynamic array */
     struct virtio_vsock_connection** conns; /* dynamic array: fd -> connection */
-
     struct virtio_vsock_connection* conns_by_host_port; /* hash table: host port -> connection */
+
+    struct virtio_vsock_packet** pending_tq_control_packets;
+    uint32_t pending_tq_control_packets_cnt;
+    uint32_t pending_tq_control_packets_idx; /* first prepared-but-not-yet-sent pending packet */
 
     /* statically allocated in shared memory, accesses via vm_shared_writex() */
     char* shared_rq_buf;  /* internal buffer where incoming packets are copied from */
