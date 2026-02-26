@@ -15,6 +15,8 @@
 #include "kernel_virtio.h"
 #include "kernel_vmm_inputs.h"
 
+#define MAX_TEXT_FILE_SIZE (1024 * 1024 * 1024) /* 1GB */
+
 int read_text_file_to_cstr(const char* path, char** out_buf, uint64_t* out_size) {
     int ret;
     uint64_t nodeid;
@@ -33,7 +35,7 @@ int read_text_file_to_cstr(const char* path, char** out_buf, uint64_t* out_size)
     opened = true;
 
     struct fuse_attr attr;
-    ret = virtio_fs_fuse_getattr(nodeid, fh, FUSE_GETATTR_FH, &attr);
+    ret = virtio_fs_fuse_getattr(nodeid, fh, FUSE_GETATTR_FH, MAX_TEXT_FILE_SIZE, &attr);
     if (ret < 0)
         goto out;
 
@@ -46,7 +48,7 @@ int read_text_file_to_cstr(const char* path, char** out_buf, uint64_t* out_size)
     uint64_t bytes_read = 0;
     while (bytes_read < attr.size) {
         uint64_t read_size;
-        ret = virtio_fs_fuse_read(nodeid, fh, MIN(attr.size - bytes_read, FILECHUNK_MAX),
+        ret = virtio_fs_fuse_read(nodeid, fh, MIN(attr.size - bytes_read, FILE_CHUNK_SIZE),
                                   bytes_read, buf + bytes_read, &read_size);
         if (ret < 0) {
             if (ret == -PAL_ERROR_INTERRUPTED)
@@ -87,7 +89,7 @@ int emulate_file_map_via_read(uint64_t nodeid, uint64_t fh, void* addr, uint64_t
     uint64_t bytes_read = 0;
     while (bytes_read < size) {
         uint64_t read_size;
-        int ret = virtio_fs_fuse_read(nodeid, fh, MIN(size - bytes_read, FILECHUNK_MAX),
+        int ret = virtio_fs_fuse_read(nodeid, fh, MIN(size - bytes_read, FILE_CHUNK_SIZE),
                                       offset + bytes_read, addr + bytes_read, &read_size);
         if (ret < 0) {
             if (ret == -PAL_ERROR_INTERRUPTED)
@@ -147,6 +149,8 @@ int realpath(const char* path, char* got_path, char** out_got_path) {
     memcpy(copy_path + (PATH_MAX - 1) - path_len, path, path_len + 1);
     path = copy_path + (PATH_MAX - 1) - path_len;
     allocated_path = got_path ? NULL : (got_path = malloc(PATH_MAX));
+    if (!got_path)
+        return -PAL_ERROR_NOMEM;
 
     max_path = got_path + PATH_MAX - 2; /* points to last non-NUL char */
     new_path = got_path;
@@ -212,11 +216,8 @@ int realpath(const char* path, char* got_path, char** out_got_path) {
         if (ret < 0)
             goto out;
 
-        /* virtiofs readlink() may overwrite the out buffer even in case of failure, so we use a
-         * temporary stack var `link_path` for it and then copy into `copy_path` on success */
-        char link_path[PATH_MAX];
         uint64_t link_len = 0;
-        ret = virtio_fs_fuse_readlink(nodeid, PATH_MAX - 1, link_path, &link_len);
+        ret = virtio_fs_fuse_readlink(nodeid, PATH_MAX - 1, copy_path, &link_len);
         if (ret < 0) {
             /* PAL_ERROR_INVAL means the file exists but isn't a symlink, that's benign, simply
              * continue with next pathname component */
@@ -224,8 +225,8 @@ int realpath(const char* path, char* got_path, char** out_got_path) {
                 *new_path++ = '/';
                 continue;
             }
-            /* FIXME: virtiofsd for some reason returns ENOENT, tracked at
-             *        https://gitlab.com/virtio-fs/virtiofsd/-/issues/91 */
+            /* Linux and virtiofsd return -ENOENT on non-symlink files when using the format
+             * `readlinkat(dirfd, "")`, see https://gitlab.com/virtio-fs/virtiofsd/-/issues/91 */
             if (ret == -PAL_ERROR_STREAMNOTEXIST) {
                 *new_path++ = '/';
                 continue;
@@ -234,9 +235,6 @@ int realpath(const char* path, char* got_path, char** out_got_path) {
             /* all other error codes mean actual failure */
             goto out;
         }
-
-        assert(link_len);
-        memcpy(copy_path, link_path, link_len);
 
         if (path_len + link_len >= PATH_MAX - 2) {
             ret = -PAL_ERROR_TOOLONG;
