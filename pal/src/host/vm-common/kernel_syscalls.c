@@ -17,7 +17,9 @@
 extern void syscall_asm(void);
 
 int syscalls_init(void) {
-    extern char gdt_start[], gdt_entry_kernel_cs[], gdt_entry_user_cs[];
+    extern char gdt_start[1];
+    extern char gdt_entry_kernel_cs[1];
+    extern char gdt_entry_user_cs[1];
 
     /*
      * IA32_STAR MSR has weird semantics (for 64-bit mode with SYSCALL/SYSRET):

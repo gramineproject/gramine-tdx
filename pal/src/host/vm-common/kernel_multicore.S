@@ -16,7 +16,7 @@
 // protected mode goes into 64-bit mode, sets up its own stack and then jumps to the kernel AP code
 // (written in C). This code is assumed to fit into one 4KB page. See also kernel_multicore.{h,c}.
 
-    .sect   .ap_startup_page, "ax"
+    .section .ap_startup_page, "ax"
     .align  0x1000
     .code16
 ap_startup_page_start:

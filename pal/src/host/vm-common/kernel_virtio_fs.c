@@ -587,20 +587,20 @@ int virtio_fs_fuse_getattr(uint64_t nodeid, uint64_t fh, uint32_t flags, uint64_
 
     /* zero out unused fields, so that no malicious data is transmitted into private memory
      * (the only currently used fields are `size` and `mode`) */
-	attr_out.attr.ino       = 0;
-	attr_out.attr.blocks    = 0;
-	attr_out.attr.atime     = 0;
-	attr_out.attr.mtime     = 0;
-	attr_out.attr.ctime     = 0;
-	attr_out.attr.atimensec = 0;
-	attr_out.attr.mtimensec = 0;
-	attr_out.attr.ctimensec = 0;
-	attr_out.attr.nlink     = 0;
-	attr_out.attr.uid       = 0;
-	attr_out.attr.gid       = 0;
-	attr_out.attr.rdev      = 0;
-	attr_out.attr.blksize   = 0;
-	attr_out.attr.padding   = 0;
+    attr_out.attr.ino       = 0;
+    attr_out.attr.blocks    = 0;
+    attr_out.attr.atime     = 0;
+    attr_out.attr.mtime     = 0;
+    attr_out.attr.ctime     = 0;
+    attr_out.attr.atimensec = 0;
+    attr_out.attr.mtimensec = 0;
+    attr_out.attr.ctimensec = 0;
+    attr_out.attr.nlink     = 0;
+    attr_out.attr.uid       = 0;
+    attr_out.attr.gid       = 0;
+    attr_out.attr.rdev      = 0;
+    attr_out.attr.blksize   = 0;
+    attr_out.attr.padding   = 0;
 
     /* verify queried file size against a caller-specified limit */
     if (attr_out.attr.size > max_size)
