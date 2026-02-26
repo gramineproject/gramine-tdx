@@ -108,6 +108,38 @@ static inline void wrfsbase(uint64_t addr) {
         :: "D"(addr) : "memory");
 }
 
+static inline void flush_tlb(void) {
+    __asm__ volatile("mov %%cr3, %%rax; mov %%rax, %%cr3" ::: "rax", "memory");
+}
+
+static inline void invlpg(uint64_t addr) {
+    __asm__ volatile("invlpg (%0)" ::"r"(addr) : "memory");
+}
+
+static inline void cli(void) {
+    __asm__ volatile("cli" ::: "memory");
+}
+
+static inline void sti(void) {
+    __asm__ volatile("sti" ::: "memory");
+}
+
+static inline void ltr(uint64_t segment_selector) {
+    __asm__ volatile("ltr %w0" :: "r"(segment_selector) : "memory");
+}
+
+static inline void wrmsr(uint64_t msr, uint64_t value) {
+    uint32_t low = value & 0xFFFFFFFF;
+    uint32_t high = value >> 32;
+    __asm__ volatile("wrmsr" : : "c"(msr), "a"(low), "d"(high));
+}
+
+static inline uint64_t rdmsr(uint64_t msr) {
+    uint32_t low, high;
+    __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+    return ((uint64_t)high << 32) | low;
+}
+
 /* This function must be breakable for debugging and GDB integration scripts (e.g. see
  * `fork_and_access_file.gdb` in LibOS regression tests). */
 __attribute__((__noinline__)) __attribute__((unused))

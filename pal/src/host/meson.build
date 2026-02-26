@@ -8,3 +8,7 @@ endif
 if sgx
     subdir('linux-sgx')
 endif
+if vm
+    subdir('vm-common')
+    subdir('vm')
+endif
