@@ -285,15 +285,30 @@ int64_t pal_common_file_read(struct pal_handle* handle, uint64_t offset, uint64_
 
     if (!handle->file.chunk_hashes) {
         /* case of passthrough/allowed file */
-        uint64_t read_size;
-        ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh, MIN(count, FILE_CHUNK_SIZE),
-                                  offset, buffer, &read_size);
-        if (ret < 0)
-            return ret;
 
-        return (int64_t)read_size;
+        /* try to read the whole buffer (this is important for some workloads like Java); do it in
+         * FILE_CHUNK_SIZE chunks because virtio-fs cannot consume more than this limit at a time */
+        uint64_t total_read_size = 0;
+        while (total_read_size < count) {
+            uint64_t read_size;
+            ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh,
+                                      MIN(count - total_read_size, FILE_CHUNK_SIZE),
+                                      offset + total_read_size, buffer + total_read_size,
+                                      &read_size);
+            if (ret < 0) {
+                if (ret == -PAL_ERROR_INTERRUPTED)
+                    continue;
+                return total_read_size ? (int64_t)total_read_size : ret;
+            }
+
+            if (read_size == 0)
+                break;
+
+            total_read_size += read_size;
+        }
+
+        return (int64_t)total_read_size;
     }
-
 
     /* case of trusted file */
     uint64_t file_size = handle->file.size;
