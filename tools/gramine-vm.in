@@ -91,7 +91,7 @@ QEMU_CPU_NUM=${QEMU_CPU_NUM:-"1"}
 QEMU_PATH="qemu"
 QEMU_VM="-cpu host,host-phys-bits,-kvm-steal-time,pmu=off,+tsc-deadline,+invtsc \
     -m $QEMU_MEM_SIZE -smp $QEMU_CPU_NUM"
-QEMU_OPTS="-enable-kvm -vga none -nographic -no-reboot -monitor chardev:mux -no-hpet \
+QEMU_OPTS="-enable-kvm -vga none -display none -no-reboot -monitor none -machine hpet=off \
     -object memory-backend-file,id=mem,size=$QEMU_MEM_SIZE,mem-path=/dev/shm,share=on \
     -numa node,memdev=mem"
 
@@ -150,8 +150,8 @@ if [ $EXIT_STATUS -ne 0 ]; then
 fi
 
 QEMU_VIRTIO_CONSOLE="-device virtio-serial,iommu_platform=off,romfile= \
-                     -chardev stdio,id=mux,mux=on \
-                     -device virtconsole,chardev=mux -serial chardev:mux"
+                     -chardev stdio,id=virtioconsole0 \
+                     -device virtconsole,chardev=virtioconsole0"
 QEMU_VIRTIO_FS="-chardev socket,path=/tmp/gramine_vhostfs_"$GRAMINE_VM_ID",id=vhostfs \
                 -device vhost-user-fs-pci,iommu_platform=off,queue-size=1024,chardev=vhostfs,tag=graminefs"
 QEMU_VIRTIO_VSOCK="-device vhost-vsock-pci,iommu_platform=off,guest-cid="$GRAMINE_VM_ID",id=vsockdev"
