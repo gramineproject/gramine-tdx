@@ -104,12 +104,57 @@ QEMU_MACHINE="-M q35,kernel_irqchip=split,confidential-guest-support=tdx \
 QEMU_BINARIES="-bios $TDSHIM_PAL_PATH"
 fi
 
+# We need to specify a Gramine VM ID to be able to run two independent Gramine instances at the
+# same time on the same machine. They are used as IDs for the virtiofs and the vsock guest-cid.
+DEFAULT_GRAMINE_VM_ID=10
+GRAMINE_VM_ID=$(python3 -c "
+import psutil
+import re
+
+# Identify the qemu processes
+qemu_processes = []
+try:
+    for process in psutil.process_iter(['pid', 'name', 'cmdline']):
+        if 'qemu' in process.info['name']:
+            qemu_processes.append(process)
+except Exception:
+    sys.exit('Exception while iterating over system processes.')
+
+# Identify the occupied guest-cids
+used_cids = set()
+for process in qemu_processes:
+    pid = process.info['pid']
+    cmdline = ' '.join(process.info['cmdline'])
+    match = re.search(r'guest-cid=(\d+)', cmdline)
+    guest_cid = int(match.group(1)) if match else None
+    if guest_cid is not None:
+        used_cids.add(guest_cid)
+
+# Identify the next available Gramine VM ID based on the uniquely assigned vsock guest-cid.
+cid = "$DEFAULT_GRAMINE_VM_ID"
+while cid in used_cids:
+    cid += 1
+
+# Check that the guest-cid is in a valid range
+if cid > 2 and cid < 0xffffffff:
+    print(cid)
+else:
+    sys.exit('Invalid chosen CID value: ' + str(cid) + '. It must be > 2 and < 0xffffffff.')
+" 2>&1)
+EXIT_STATUS=$?
+
+if [ $EXIT_STATUS -ne 0 ]; then
+    echo "Error: Python script for determining the Gramine-VM ID exited with a non-zero status: $EXIT_STATUS"
+    echo "Error message: $GRAMINE_VM_ID"
+    exit $EXIT_STATUS
+fi
+
 QEMU_VIRTIO_CONSOLE="-device virtio-serial,iommu_platform=off,romfile= \
                      -chardev stdio,id=mux,mux=on \
                      -device virtconsole,chardev=mux -serial chardev:mux"
-QEMU_VIRTIO_FS="-chardev socket,path=/tmp/vhostfs,id=vhostfs \
+QEMU_VIRTIO_FS="-chardev socket,path=/tmp/gramine_vhostfs_"$GRAMINE_VM_ID",id=vhostfs \
                 -device vhost-user-fs-pci,iommu_platform=off,queue-size=1024,chardev=vhostfs,tag=graminefs"
-QEMU_VIRTIO_VSOCK="-device vhost-vsock-pci,iommu_platform=off,guest-cid=10,id=vsockdev"
+QEMU_VIRTIO_VSOCK="-device vhost-vsock-pci,iommu_platform=off,guest-cid="$GRAMINE_VM_ID",id=vsockdev"
 
 # Due to QEMU syntax, commas in the QEMU cmdline need to be escaped using an additional comma.
 APPLICATION=${APPLICATION//","/",,"}
@@ -133,8 +178,13 @@ CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
         -fw_cfg name=opt/gramine/envs,string="$GRAMINE_ENVS" \
         -fw_cfg name=opt/gramine/unixtime_s,string="$EPOCHSECONDS")
 
-virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error \
+# Check if the Gramine vhostfs pid file is already in use by another process
+if lsof /tmp/gramine_vhostfs_"$GRAMINE_VM_ID".pid 2> /dev/null; then
+    echo "Error: /tmp/gramine_vhostfs_"$GRAMINE_VM_ID".pid is already in use."
+    exit 2
+fi
+virtiofsd --socket-path /tmp/gramine_vhostfs_"$GRAMINE_VM_ID" --shared-dir / --log-level error \
     --sandbox none --no-announce-submounts &
-while [ ! -e /tmp/vhostfs ]; do sleep 0.1; done;
+while [ ! -e /tmp/gramine_vhostfs_"$GRAMINE_VM_ID" ]; do sleep 0.1; done;
 
 exec env "${CMD[@]}"
