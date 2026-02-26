@@ -369,6 +369,11 @@ int vm_virtualization_exception(struct isr_regs* regs) {
                 regs->rax = regs->rbx = regs->rcx = regs->rdx = 0x00000000;
                 regs->rip += vmexit_instr_length;
                 return 0;
+            } else if (regs->rax >= 0x40000000 && regs->rax <= 0x40010000) {
+                /* hypervisor-specific leaves -- return all zeros (i.e. no hypervisor) */
+                regs->rax = regs->rbx = regs->rcx = regs->rdx = 0x00000000;
+                regs->rip += vmexit_instr_length;
+                return 0;
             } else if (regs->rax == 0x80000002) {
                 /*
                  * Processor Brand String -- we hard-code rather dummy string, see below.
