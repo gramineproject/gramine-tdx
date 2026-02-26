@@ -1,0 +1,4 @@
+option('vm', type: 'combo', choices: ['disabled', 'enabled'], yield: true,
+      description: 'Build Virtual Machine (VM, currently only x86-64) PAL')
+option('tdx', type: 'combo', choices: ['disabled', 'enabled'], yield: true,
+      description: 'Build Trusted Domain Extensions (aka TDX) PAL')
