@@ -47,7 +47,9 @@ int init_multicore_prepare(uint32_t num_cpus) {
     g_per_cpu_data = calloc(num_cpus, sizeof(struct per_cpu_data));
     char* per_cpu_interrupt_stack = calloc(num_cpus + 1, INTERRUPT_STACK_SIZE);
     char* per_cpu_interrupt_xsave_area = calloc(num_cpus + 1, INTERRUPT_XSAVE_AREA_SIZE);
-    if (!g_per_cpu_data || !per_cpu_interrupt_stack || !per_cpu_interrupt_xsave_area)
+    char* per_cpu_scheduling_stack = calloc(num_cpus, SCHEDULING_STACK_SIZE);
+    if (!g_per_cpu_data || !per_cpu_interrupt_stack || !per_cpu_interrupt_xsave_area
+            || !per_cpu_scheduling_stack)
         return -PAL_ERROR_NOMEM;
 
     /* interrupt stacks/xsave areas may be allocated not at page boundary, so need to adjust */
@@ -65,6 +67,7 @@ int init_multicore_prepare(uint32_t num_cpus) {
         g_per_cpu_data[i].interrupt_stack = per_cpu_interrupt_stack + i * INTERRUPT_STACK_SIZE;
         g_per_cpu_data[i].interrupt_xsave_area = per_cpu_interrupt_xsave_area
                                                      + i * INTERRUPT_XSAVE_AREA_SIZE;
+        g_per_cpu_data[i].scheduling_stack = per_cpu_scheduling_stack + i * SCHEDULING_STACK_SIZE;
     }
 
     /* only CPU0 has a bottomhalves thread currently (i.e. CPU0 handles all incoming events) */
