@@ -198,7 +198,7 @@ void sched_thread_wakeup(int* futex_word) {
 
 void sched_thread_add(struct thread* thread) {
     spinlock_lock_disable_irq(&g_thread_list_lock);
-	LISTP_ADD_TAIL(thread, &g_thread_list, list);
+    LISTP_ADD_TAIL(thread, &g_thread_list, list);
     spinlock_unlock_enable_irq(&g_thread_list_lock);
 }
 
