@@ -244,6 +244,16 @@ void prepare_sigframe(PAL_CONTEXT* context, siginfo_t* siginfo, void* handler, v
 
     pal_context_to_ucontext(&sigframe->uc, context);
 
+    /* FIXME: make this VM/TDX PAL logic more generic */
+    if (!strcmp(g_pal_public_state->host_type, "VM") ||
+            !strcmp(g_pal_public_state->host_type, "TDX")) {
+        /* Rewire saved sigframe RIP to the where-to-return app code RIP (saved in PAL's TCB) */
+        uint64_t user_rip;
+        void* user_rip_ptr = (char*)pal_get_tcb() + g_pal_public_state->vm_user_rip_offset;
+        memcpy(&user_rip, user_rip_ptr, sizeof(user_rip));
+        ucontext_set_ip(&sigframe->uc, user_rip);
+    }
+
     /* XXX: Currently we assume that `struct libos_xstate`, `PAL_XREGS_STATE` and `struct _fpstate`
      * (just the header) are the very same structure. This mess needs to be fixed. */
     static_assert(sizeof(struct libos_xstate) == sizeof(PAL_XREGS_STATE),
@@ -267,6 +277,18 @@ void prepare_sigframe(PAL_CONTEXT* context, siginfo_t* siginfo, void* handler, v
     stack -= 8;
     *(uint64_t*)stack = (uint64_t)restorer;
 
+    /*
+     * FIXME: Here the execution context is rewired to jump to the app's signal handler; afterwards
+     * the app will pop the frame from the stack and end up calling the restorer (set up on the
+     * stack above), which will call rt_sigreturn syscall. This rewiring bypasses the ring-0/ring-3
+     * wrapper code of VM-based PALs.
+     *
+     * However, this works on VM-based PALs (though incorrect isolation-wise). That's because even
+     * though the app signal handler will execute in ring-0, VM PALs have a flat 1:1
+     * virtual-to-physical memory mapping, and the app signal handler can access all memory
+     * normally; and when the signal handler performs syscall(rt_sigreturn) instruction, x86 arch
+     * allows to call this instruction even from ring-0.
+     */
     context->rip = (uint64_t)handler;
     context->rsp = stack;
     /* x64 SysV ABI mandates that DF flag is cleared and states that rest of flags is *not*
