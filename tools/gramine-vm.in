@@ -135,5 +135,6 @@ CMD+=($QEMU_PATH $QEMU_GDB $QEMU_VM $QEMU_OPTS $QEMU_MACHINE \
 
 virtiofsd --socket-path /tmp/vhostfs --shared-dir / --log-level error \
     --sandbox none --no-announce-submounts &
+while [ ! -e /tmp/vhostfs ]; do sleep 0.1; done;
 
 exec env "${CMD[@]}"
