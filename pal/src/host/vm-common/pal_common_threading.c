@@ -43,19 +43,12 @@ int pal_common_thread_create(struct pal_handle** handle, int (*callback)(void*),
     if (!thread_handle)
         return -PAL_ERROR_NOMEM;
 
-    /* fpregs may be allocated not at VM_XSAVE_ALIGN boundary, so need to add a margin for that */
-    assert(g_xsave_size);
-    void* fpregs = malloc(g_xsave_size + VM_XSAVE_ALIGN);
-    if (!fpregs) {
+    void* stack;
+    void* fpregs;
+    int ret = thread_get_stack_and_fpregs(&stack, &fpregs);
+    if (ret < 0) {
         free(thread_handle);
-        return -PAL_ERROR_NOMEM;
-    }
-
-    void* stack = thread_get_stack();
-    if (!stack) {
-        free(fpregs);
-        free(thread_handle);
-        return -PAL_ERROR_NOMEM;
+        return ret;
     }
 
     /* init TCB in the highest part of the allocated stack region */
@@ -65,7 +58,6 @@ int pal_common_thread_create(struct pal_handle** handle, int (*callback)(void*),
     thread_handle->hdr.type = PAL_TYPE_THREAD;
     thread_handle->thread.tid = assign_new_tid();
     thread_handle->thread.stack = stack;
-    thread_handle->thread.fpregs = fpregs;
     thread_handle->thread.kernel_thread = &tcb->kernel_thread;
 
     tcb->common.self   = &tcb->common;
@@ -88,9 +80,6 @@ noreturn void pal_common_thread_exit(int* clear_child_tid) {
     struct pal_tcb_vm* curr_tcb = (struct pal_tcb_vm*)pal_get_tcb();
     struct pal_handle* thread_handle = curr_tcb->thread_handle;
     assert(thread_handle);
-
-    /* at this point, we are guaranteed to not use this thread_handle's fpregs aka XSAVE area */
-    free(thread_handle->thread.fpregs);
 
     /* get this thread_handle off the schedulable list */
     sched_thread_remove(&curr_tcb->kernel_thread);

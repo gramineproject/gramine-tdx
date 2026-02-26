@@ -108,8 +108,7 @@ struct pal_handle_inner_sock {
 
 struct pal_handle_inner_thread {
     uint32_t tid;
-    void*    stack;  /* points to the base of stack, suitable for free(stack) */
-    void*    fpregs; /* points to XSAVE memory region, suitable for free(fpregs) */
+    void*    stack;  /* points to base of stack + fpregs mem region, suitable for free(stack) */
     struct thread* kernel_thread;
 };
 
