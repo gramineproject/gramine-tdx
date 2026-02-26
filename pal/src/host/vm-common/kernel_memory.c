@@ -463,7 +463,7 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
     /*
      * Mark the following memory regions as reserved (in addition to the above ones, extracted from
      * the E820 table), so that memory allocator doesn't use them:
-     *   - [0, 1MB):       legacy DOS (includes DOS area, SMM memory, System BIOS),
+     *   - [4KB, 1MB):     legacy DOS (includes DOS area, SMM memory, System BIOS),
      *   - [512MB, 658MB): page tables (for app memory and ASan shadow memory),
      *   - [658MB, 896MB): shared memory for virtqueues and for Quote (in TDX case),
      *   - [2GB, 3GB):     memory hole (QEMU doesn't map any memory here),
@@ -472,6 +472,9 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
      *                     Address Sanitizer shadow memory (physical memory region).
      *
      * Some notes on how this layout interplays with other regions:
+     *   - Region [0, 4KB) is not marked as reserved (but page protections are NONE, see below).
+     *     This is required to allow memory faults on special address 0x0; if we would mark this
+     *     region as reserved in LibOS, it would die with "Internal memory fault with VMA" on 0x0.
      *   - In non-TDX case, the PAL binary is put at [1MB, 4MB).
      *   - In TDX case, the PAL binary is put at the top of RAM (but below 2GB). We enforce RAM to
      *     be at least 1GB, so in the worst case, the PAL binary + other TDShim data is put at
@@ -480,7 +483,7 @@ int memory_preload_ranges(e820_table_entry* e820_entries, size_t e820_entries_si
      *     binaries we've seen in the wild have up to 300MB. Our layout allows to put such app
      *     binary at [4MB, 512MB), which is enough to host a 508MB-sized binary.
      */
-    ret = callback(0x0UL, 0x100000UL, "dos_memory_addr");
+    ret = callback(0x1000UL, 0x100000UL - 0x1000UL, "dos_memory_addr");
     if (ret < 0)
         return -PAL_ERROR_NOMEM;
     ret = callback(PAGE_TABLES_ADDR, PAGE_TABLES_SIZE, "page_tables");
@@ -574,6 +577,10 @@ int memory_init(e820_table_entry* e820_entries, size_t e820_entries_size,
         if (memory_address_end < e820_entries[i].address + e820_entries[i].size)
             memory_address_end = e820_entries[i].address + e820_entries[i].size;
     }
+
+    /* never start at 0x0, see explanation in memory_preload_ranges() */
+    if (memory_address_start == 0x0)
+        memory_address_start = 0x1000;
 
     if (memory_address_start >= memory_address_end)
         return -PAL_ERROR_DENIED;
