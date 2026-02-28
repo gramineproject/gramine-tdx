@@ -88,6 +88,15 @@ static int chroot_lookup(struct libos_dentry* dent) {
             type = S_IFDIR;
             break;
         case PAL_TYPE_DEV:
+            /* VM/TDX reject PAL_TYPE_DEV here; Linux/SGX map it to S_IFCHR. */
+            if (!strcmp(g_pal_public_state->host_type, "VM")
+                    || !strcmp(g_pal_public_state->host_type, "TDX")) {
+                log_warning("trying to access '%s' which is a device; "
+                            "Gramine-TDX currently supports only regular files and dirs",
+                            uri);
+                ret = -EACCES;
+                goto out;
+            }
             type = S_IFCHR;
             break;
         case PAL_TYPE_PIPE:
