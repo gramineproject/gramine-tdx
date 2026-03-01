@@ -167,6 +167,10 @@ if vm and host_machine.cpu_family() != 'x86_64'
     error('VM PAL is currently available only for x86-64 arch')
 endif
 
+if vm or tdx
+    add_project_arguments('-DGRAMINE_ENTRY_USE_SYSCALL_INSTR', language: ['c'])
+endif
+
 gen_symbol_map_cmd = [
     find_program('nm'),
     '--numeric-sort', '--defined-only', '--print-size', '--line-numbers',

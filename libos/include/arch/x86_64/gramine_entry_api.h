@@ -23,7 +23,11 @@
 
 .macro GRAMINE_SYSCALL
 leaq .Lafter_gramine_syscall\@(%rip), %rcx
+#ifdef GRAMINE_ENTRY_USE_SYSCALL_INSTR
+syscall
+#else
 jmpq *%gs:GRAMINE_SYSCALL_OFFSET
+#endif /* GRAMINE_ENTRY_USE_SYSCALL_INSTR */
 .Lafter_gramine_syscall\@:
 .endm
 
@@ -38,7 +42,11 @@ jmpq *%gs:GRAMINE_SYSCALL_OFFSET
 __asm__(
     ".macro GRAMINE_SYSCALL\n"
     "leaq .Lafter_gramine_syscall\\@(%rip), %rcx\n"
+#ifdef GRAMINE_ENTRY_USE_SYSCALL_INSTR
+    "syscall\n"
+#else
     "jmpq *%gs:" GRAMINE_XSTR(GRAMINE_SYSCALL_OFFSET) "\n"
+#endif /* GRAMINE_ENTRY_USE_SYSCALL_INSTR */
     ".Lafter_gramine_syscall\\@:\n"
     ".endm\n"
 );
