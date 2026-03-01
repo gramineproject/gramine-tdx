@@ -52,7 +52,11 @@ __attribute__((naked)) static int gramine_call(int number __attribute__((unused)
                                                unsigned long arg2 __attribute__((unused))) {
     __asm__ (
         "mov $" GRAMINE_XSTR(GRAMINE_CUSTOM_SYSCALL_NR) ", %eax\n"
+#ifdef GRAMINE_CALL_USE_SYSCALL_INSTR
+        "syscall\n"
+#else
         "GRAMINE_SYSCALL\n"
+#endif
         "ret\n"
     );
 }
