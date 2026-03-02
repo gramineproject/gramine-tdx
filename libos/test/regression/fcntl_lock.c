@@ -122,7 +122,7 @@ static bool try_lock(int cmd, int type, int whence, long int start, long int len
         return ret == 0;
     }
 }
-
+#ifndef TDX_UNSUPPORTED_FEATURE
 /* Check whether F_GETLK returns the right conflicting lock. */
 static void lock_check(int type, long int start, long int len, int conflict_type,
                        long int conflict_start, long int conflict_len) {
@@ -144,7 +144,7 @@ static void lock_check(int type, long int start, long int len, int conflict_type
              str_type(conflict_type), conflict_start, conflict_len);
     }
 }
-
+#endif
 static void unlock(long int start, long int len) {
     if (!try_lock(F_SETLK, F_UNLCK, SEEK_SET, start, len))
         errx(1, "unlock failed");
@@ -157,7 +157,7 @@ static void lock(int type, long int start, long int len) {
             || !try_lock(F_SETLK, type, SEEK_SET, start, len))
         errx(1, "setting %s failed", str_type(type));
 }
-
+#ifndef TDX_UNSUPPORTED_FEATURE
 static void lock_wait_ok(int type, long int start, long int len) {
     if (!try_lock(F_SETLKW, type, SEEK_SET, start, len))
         errx(1, "waiting for %s failed", str_type(type));
@@ -168,7 +168,7 @@ static void lock_fail(int type, long int start, long int len) {
             || try_lock(F_SETLK, type, SEEK_SET, start, len))
         errx(1, "setting %s succeeded unexpectedly", str_type(type));
 }
-
+#endif
 /*
  * Test: lock/unlock various ranges. The locks are all for the same process, so the test is unlikely
  * to fail, but it's useful for checking if the locks are replaced and merged correctly (by looking
@@ -194,7 +194,7 @@ static void test_ranges(void) {
     lock(F_WRLCK, 0, 30);
     lock(F_WRLCK, 30, 30);
 }
-
+#ifndef TDX_UNSUPPORTED_FEATURE
 static void wait_for_child(void) {
     int ret;
     do {
@@ -437,7 +437,7 @@ static void test_parent_wait_child_cloexec(void) {
     wait_for_child();
     close_pipes(pipes);
 }
-
+#endif
 
 int main(void) {
     setbuf(stdout, NULL);
@@ -447,12 +447,14 @@ int main(void) {
         err(1, "open");
 
     test_ranges();
+#ifndef TDX_UNSUPPORTED_FEATURE
     test_child_exit();
     test_file_close();
     test_child_wait();
     test_parent_wait();
     test_parent_wait_child_cloexec();
     test_range_with_eof();
+#endif
 
     if (close(g_fd) < 0)
         err(1, "close");

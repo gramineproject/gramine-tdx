@@ -261,6 +261,12 @@ foreach conf: configurations
             '-Wno-unused-parameter',
         ]
 
+        # Skip some regression test steps that require process creation, as VM/TDX backends
+        # do not support it yet.
+        if vm or tdx
+            c_args += '-DTDX_UNSUPPORTED_FEATURE'
+        endif
+
         link_args = [
             '-pthread',
         ]

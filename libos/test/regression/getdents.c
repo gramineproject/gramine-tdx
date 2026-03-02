@@ -160,12 +160,16 @@ int main(void) {
         return 1;
 
     fflush(stdout);
+    int need_cleanup = 1;
 
+#ifndef TDX_UNSUPPORTED_FEATURE
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
         return 1;
     }
+
+    need_cleanup = pid != 0;
 
     const char* process = pid ? "parent getdents64" : "child getdents64";
     count = do_getdents64(process, fd, BUF_SIZE_SMALL);
@@ -195,6 +199,15 @@ int main(void) {
             return 1;
         }
 
+    }
+#else
+    rv = close(fd);
+    if (rv) {
+        perror("close after pre-fork getdents");
+        return 1;
+    }
+#endif
+    if (need_cleanup) {
         // cleanup
         remove("root/testdir/file1");
         remove("root/testdir/file2");

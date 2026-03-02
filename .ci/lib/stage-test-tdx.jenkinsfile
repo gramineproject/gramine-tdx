@@ -1,4 +1,4 @@
-stage('test-vm') {
+stage('test-tdx') {
     if (env.RA_TYPE == null) {
         env.RA_TYPE = 'epid'
     }

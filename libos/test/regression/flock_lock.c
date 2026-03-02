@@ -55,6 +55,7 @@ static void try_flock(int fd, int operation, int expected_ret) {
     }
 }
 
+#ifndef TDX_UNSUPPORTED_FEATURE
 static void try_fcntl(int fd, int operation, int type, int expected_ret, int expected_errno) {
     struct flock fl = {
         .l_type = type,
@@ -71,6 +72,7 @@ static void try_fcntl(int fd, int operation, int type, int expected_ret, int exp
         errx(1, "fcntl(%d) error with errno = %d, expected errno = %d", fd, errno, expected_errno);
     }
 }
+#endif
 
 static void open_pipes(int pipes[2][2]) {
     for (unsigned int i = 0; i < 2; i++) {
@@ -120,6 +122,7 @@ static void test_flock_dup_open(void) {
     CHECK(close(fd3));
 }
 
+#ifndef TDX_UNSUPPORTED_FEATURE
 static void test_flock_mix_with_fcntl(void) {
     printf("testing locks with BSD (flock) and POSIX (fcntl) mix...\n");
 
@@ -155,6 +158,7 @@ static void test_flock_mix_with_fcntl(void) {
     CHECK(close(fd));
     CHECK(unlink(TEST_FILE2));
 }
+#endif
 
 static void test_mmap_flock_close_unmap(void) {
     printf("testing locks with the mmap and flock...\n");
@@ -233,7 +237,10 @@ int main(void) {
     setbuf(stdout, NULL);
 
     test_flock_dup_open();
+
+#ifndef TDX_UNSUPPORTED_FEATURE
     test_flock_mix_with_fcntl();
+#endif
     test_mmap_flock_close_unmap();
     test_flock_multithread();
 

@@ -5,6 +5,8 @@ import unittest
 
 from graminelibos.regression import (
     HAS_SGX,
+    HAS_VM,
+    HAS_TDX,
     RegressionTestCase,
 )
 
@@ -100,6 +102,7 @@ class TC_00_FileSystem(RegressionTestCase):
     # Below test requires it, so skip it. We decided not to implement it as we don't know any
     # workload using it.
     @unittest.skipIf(HAS_SGX, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in Linux-SGX PAL')
+    @unittest.skipIf(HAS_TDX or HAS_VM, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in TDX/VM PAL')
     def test_111_read_write_mmap(self):
         file_path = os.path.join(self.OUTPUT_DIR, 'test_111') # new file to be created
         stdout, stderr = self.run_binary(['read_write_mmap', file_path])
@@ -322,14 +325,17 @@ class TC_00_FileSystem(RegressionTestCase):
     # These tests require it, so skip them. We decided not to implement it as we don't
     # know any workload using it.
     @unittest.skipIf(HAS_SGX, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in Linux-SGX PAL')
+    @unittest.skipIf(HAS_TDX or HAS_VM, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in TDX/VM PAL')
     def test_204_copy_dir_mmap_whole(self):
         self.do_copy_test('copy_mmap_whole', 30)
 
     @unittest.skipIf(HAS_SGX, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in Linux-SGX PAL')
+    @unittest.skipIf(HAS_TDX or HAS_VM, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in TDX/VM PAL')
     def test_205_copy_dir_mmap_seq(self):
         self.do_copy_test('copy_mmap_seq', 60)
 
     @unittest.skipIf(HAS_SGX, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in Linux-SGX PAL')
+    @unittest.skipIf(HAS_TDX or HAS_VM, 'mmap(PROT_WRITE, MAP_SHARED, fd) not implemented in TDX/VM PAL')
     def test_206_copy_dir_mmap_rev(self):
         self.do_copy_test('copy_mmap_rev', 60)
 

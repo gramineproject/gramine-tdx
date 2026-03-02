@@ -50,10 +50,14 @@ sgx_sign: helloworld.manifest helloworld
 		--output $<.sgx
 	gramine-manifest-check $<.sgx
 
-ifeq ($(SGX),)
-GRAMINE = gramine-direct
-else
+ifneq ($(TDX),)
+GRAMINE = gramine-tdx
+else ifneq ($(VM),)
+GRAMINE = gramine-vm
+else ifneq ($(SGX),)
 GRAMINE = gramine-sgx
+else
+GRAMINE = gramine-direct
 endif
 
 .PHONY: check

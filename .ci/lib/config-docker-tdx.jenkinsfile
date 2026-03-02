@@ -1,0 +1,16 @@
+// This seccomp file is based on docker_seccomp_aug_2022.json and adds `name_to_handle_at` for
+// virtiofsd.
+env.DOCKER_ARGS_COMMON +=
+    " --security-opt seccomp=${env.WORKSPACE}/scripts/docker_seccomp_aug_2025.json"
+
+// only root and `kvm` group can access /dev/kvm, so add `kvm` GID to the in-Docker user
+def kvm_gid = sh(returnStdout: true, script: 'getent group kvm | cut -d: -f3').trim()
+env.DOCKER_ARGS_COMMON += ' --group-add ' + kvm_gid
+
+env.DOCKER_ARGS_COMMON += ' --device=/dev/kvm:/dev/kvm'
+
+// Required by vsock and virtiofsd.
+env.DOCKER_ARGS_TDX = '''
+    --device=/dev/vhost-vsock:/dev/vhost-vsock
+    --cap-add DAC_READ_SEARCH
+'''

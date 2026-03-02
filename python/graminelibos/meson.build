@@ -4,6 +4,8 @@ conf.set('PKGLIBDIR', get_option('prefix') / pkglibdir)
 conf.set('LIBDIR', get_option('prefix') / get_option('libdir'))
 conf.set('SYSLIBDIR', syslibdir)
 conf.set('SGX_ENABLED', sgx ? '1' : '0')
+conf.set('VM_ENABLED',  vm  ? '1' : '0')
+conf.set('TDX_ENABLED', tdx ? '1' : '0')
 
 init_py = configure_file(
     input: '__init__.py',
