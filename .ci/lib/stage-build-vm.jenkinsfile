@@ -1,0 +1,95 @@
+stage('build-vm-dependencies') {
+    sh '''
+        mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
+
+        # Install Rust (v1.83.0 required by TD-Shim)
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.83.0 --no-modify-path
+        . "$CARGO_HOME/env"
+
+        # Install latest virtiofsd
+        git clone https://gitlab.com/virtio-fs/virtiofsd.git
+        cd virtiofsd
+        cargo build --release
+        install -D -m 0755 -s target/release/virtiofsd "$PREFIX/bin/virtiofsd"
+        cd ..
+
+        # Install latest socat (v1.8.0.3 here, at least v1.7.4)
+        SOCAT_VER=1.8.0.3
+        wget "http://www.dest-unreach.org/socat/download/socat-${SOCAT_VER}.tar.gz"
+        tar xzf "socat-${SOCAT_VER}.tar.gz"
+        cd "socat-${SOCAT_VER}"
+        ./configure --prefix="$PREFIX"
+        make
+        make install
+        cd ..
+    '''
+}
+
+stage('build') {
+    env.MESON_OPTIONS = ''
+    if (env.GRAMINE_MUSL == '1') {
+        env.MESON_OPTIONS += ' -Dlibc=musl'
+    } else {
+        env.MESON_OPTIONS += ' -Dlibc=glibc'
+    }
+    if (env.UBSAN == '1') {
+        env.MESON_OPTIONS += ' -Dubsan=enabled'
+    }
+    if (env.ASAN == '1') {
+        env.MESON_OPTIONS += ' -Dasan=enabled'
+    }
+
+    try {
+        sh '''
+            meson setup build/ \
+                --werror \
+                --prefix="$PREFIX" \
+                --buildtype="$BUILDTYPE" \
+                -Ddirect=enabled \
+                -Dsgx=disabled \
+                -Dvm=enabled \
+                -Dtdx=disabled \
+                -Dtests=enabled \
+                $MESON_OPTIONS
+            ninja -vC build/
+        '''
+
+        // install
+        sh '''
+            . "$CARGO_HOME/env"
+            ninja -vC build/ install
+            gramine-sgx-gen-private-key
+        '''
+    } finally {
+        archiveArtifacts '''
+            build/meson-logs/**/*,
+            build/subprojects/glibc-*/glibc-build.log,
+            build/subprojects/musl-*/musl-build.log,
+        '''
+    }
+
+    // archive all installed files
+    // NOTE we can't use ${env.PREFIX} here, because path needs to be relative to workdir
+    archiveArtifacts "usr/**/*"
+
+    // Absolute path to libdir, as configured by Meson.
+    // For our current builds this should be "$WORKSPACE/usr/lib/x86_64-linux-gnu":
+    // --prefix is set from $PREFIX above (see config-docker.jenkinsfile) and should be "$WORKSPACE/usr";
+    // --libdir is distro-dependent, but on Debian and derivatives it's "lib/x86_64-linux-gnu"
+    libdir = sh(returnStdout: true, script: '''
+        meson introspect build/ --buildoptions \
+        | jq -r '(map(select(.name == "prefix")) + map(select(.name == "libdir"))) | map(.value) | join("/")'
+    ''').trim()
+
+    env.GRAMINE_LIBDIR = libdir
+    env.GRAMINE_PKGLIBDIR = libdir + '/gramine'
+
+    // In CI we install to non-standard --prefix (see above). This makes sure the libraries are
+    // available anyway.
+    env.LD_LIBRARY_PATH = libdir
+    env.PKG_CONFIG_PATH = libdir + '/pkgconfig'
+
+    // prevent cheating and testing from repo
+    sh 'rm -rf build'
+    sh 'git clean -Xf subprojects'
+}
