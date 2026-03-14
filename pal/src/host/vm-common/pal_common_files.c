@@ -466,21 +466,42 @@ int pal_common_file_attrquerybyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* p
     return 0;
 }
 
+int pal_common_file_attrquerybynodeid(uint64_t nodeid, uint32_t flags, PAL_STREAM_ATTR* pal_attr) {
+    int ret;
+    assert(!(flags & FUSE_GETATTR_FH));
+
+    struct fuse_attr attr;
+    ret = virtio_fs_fuse_getattr(nodeid, 0, flags, UINT64_MAX, &attr);
+    if (ret < 0)
+        return ret;
+
+    pal_attr->handle_type  = S_ISREG(attr.mode) ? PAL_TYPE_FILE : PAL_TYPE_DIR;
+    pal_attr->share_flags  = attr.mode & PAL_SHARE_MASK;
+    pal_attr->pending_size = attr.size;
+    pal_attr->nonblocking  = false;
+    return 0;
+}
+
 int pal_common_file_attrquery(const char* type, const char* uri, PAL_STREAM_ATTR* pal_attr) {
     if (strcmp(type, URI_TYPE_FILE) && strcmp(type, URI_TYPE_DIR))
         return -PAL_ERROR_INVAL;
 
     int ret;
+    char* resolved_path = NULL;
 
-    struct pal_handle* hdl = NULL;
-    ret = pal_common_file_open(&hdl, type, uri, PAL_ACCESS_RDONLY, /*share_flags=*/0,
-                               PAL_CREATE_NEVER, PAL_OPTION_PASSTHROUGH);
+    ret = realpath(uri, /*got_path=*/NULL, &resolved_path);
     if (ret < 0)
         return ret;
+    uint64_t nodeid;
+    ret = virtio_fs_fuse_lookup(resolved_path, &nodeid);
+    if (ret < 0) {
+        free(resolved_path);
+        return ret;
+    }
 
-    ret = pal_common_file_attrquerybyhdl(hdl, pal_attr);
+    ret = pal_common_file_attrquerybynodeid(nodeid, 0, pal_attr);
 
-    pal_common_file_destroy(hdl);
+    free(resolved_path);
     return ret;
 }
 

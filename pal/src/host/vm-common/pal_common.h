@@ -62,6 +62,7 @@ int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t 
 int pal_common_file_setlength(struct pal_handle* handle, uint64_t length);
 int pal_common_file_flush(struct pal_handle* handle);
 int pal_common_file_attrquerybyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* pal_attr);
+int pal_common_file_attrquerybynodeid(uint64_t nodeid, uint32_t flags, PAL_STREAM_ATTR* pal_attr);
 int pal_common_file_attrquery(const char* type, const char* uri, PAL_STREAM_ATTR* pal_attr);
 int pal_common_file_attrsetbyhdl(struct pal_handle* handle, PAL_STREAM_ATTR* attr);
 int pal_common_file_rename(struct pal_handle* handle, const char* type, const char* uri);
