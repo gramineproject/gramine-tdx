@@ -7,7 +7,7 @@ stage('clean-check') {
      * invokes `gramine-test clean`.
      */
     sh '''
-        rm -rf XDG_CONFIG_HOME CARGO_HOME
+        rm -rf XDG_CONFIG_HOME CARGO_HOME RUSTUP_HOME
 
         REL_PREFIX=$(realpath "$PREFIX" --relative-to=.)
 
@@ -59,6 +59,9 @@ stage('clean-check') {
         rm -rf python/graminelibos/__pycache__
         rm -rf tests/__pycache__
 
+        # Remove gramine-tdx required packages installed during build stage
+        rm -rf .rustup .cargo virtiofsd td-shim socat-*.tar.gz socat-*
+
         ./scripts/clean-check
     '''
 
@@ -68,6 +71,7 @@ stage('clean-check') {
      */
     sh 'rm -rf "$PREFIX"'
     sh 'rm -rf linux-sgx-driver'
+    sh 'rm -rf .rustup .cargo virtiofsd td-shim socat-*.tar.gz socat-*'
     sh '''
         ./scripts/gitignore-test
     '''

@@ -19,7 +19,9 @@
 #define SRV_ADDR_DUMMY       "tmp/dummy"
 #define SRV_ADDR             "tmp/unix_socket"
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 static const char g_buffer[] = "Hello from UDS server!";
+#endif
 
 static void check_nonexisting_socket(void) {
     int s = CHECK(socket(AF_UNIX, SOCK_STREAM, 0));
@@ -49,6 +51,7 @@ static void create_dummy_socket(void) {
     /* do not close this socket to test two sockets in parallel */
 }
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 static void server(int pipefd) {
     int s = CHECK(socket(AF_UNIX, SOCK_STREAM, 0));
 
@@ -118,11 +121,13 @@ static void client(int pipefd) {
 
     CHECK(close(s));
 }
+#endif
 
 int main(void) {
     check_nonexisting_socket();
     create_dummy_socket();
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     int pipefds[2];
     CHECK(pipe(pipefds));
 
@@ -154,6 +159,7 @@ int main(void) {
 #if 0 /* FIXME: currently Gramine doesn't reflect named UNIX sockets in file system */
     CHECK(unlink(SRV_ADDR_DUMMY));
     CHECK(unlink(SRV_ADDR));
+#endif
 #endif
 
     puts("TEST OK");

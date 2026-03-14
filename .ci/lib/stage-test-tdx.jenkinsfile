@@ -1,4 +1,4 @@
-stage('test-vm') {
+stage('test-tdx') {
     timeout(time: 5, unit: 'MINUTES') {
         sh '''
             cd CI-Examples/helloworld
