@@ -58,7 +58,6 @@ stage('build') {
         sh '''
             . "$CARGO_HOME/env"
             ninja -vC build/ install
-            gramine-sgx-gen-private-key
         '''
     } finally {
         archiveArtifacts '''
