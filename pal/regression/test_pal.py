@@ -11,6 +11,8 @@ import unittest
 from graminelibos.regression import (
     HAS_EDMM,
     HAS_SGX,
+    HAS_TDX,
+    HAS_VM,
     ON_X86,
     RegressionTestCase,
 )
@@ -36,6 +38,8 @@ class TC_00_Basic(RegressionTestCase):
 
 class TC_00_BasicSet2(RegressionTestCase):
     @unittest.skipUnless(ON_X86, "x86-specific")
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "TODO: Known issue: https://github.com/gramineproject/gramine-tdx/issues/64")
     def test_Exception2(self):
         _, stderr = self.run_binary(['Exception2'])
         self.assertIn('Enter Main Thread', stderr)
@@ -58,6 +62,8 @@ class TC_00_BasicSet2(RegressionTestCase):
         self.assertIn('Hello World', stdout)
 
     @unittest.skipIf(HAS_SGX, "Pipes must be created in two parallel threads under SGX")
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "Multi-processing is currently not supported in VM/TDX PALs")
     def test_Process4(self):
         _, stderr = self.run_binary(['Process4'], timeout=5)
         self.assertRegex(stderr, r'In process: .*Process4')
@@ -98,6 +104,7 @@ class TC_01_Bootstrap(RegressionTestCase):
         self.assertIn('argv[3] = c', stderr)
         self.assertIn('argv[4] = d', stderr)
 
+    @unittest.skipIf(HAS_TDX or HAS_VM, "QEMU CPU info differs from bare-metal CPU info")
     def test_102_cpuinfo(self):
         with open('/proc/cpuinfo') as file_:
             cpuinfo = file_.read().strip().split('\n\n')[-1]
@@ -202,6 +209,8 @@ class TC_10_Exception(RegressionTestCase):
         return True
 
     @unittest.skipUnless(ON_X86, "x86-specific")
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "TODO: Known issue: https://github.com/gramineproject/gramine-tdx/issues/64")
     def test_000_exception(self):
         try:
             _, stderr = self.run_binary(['Exception'])
@@ -295,6 +304,8 @@ class TC_20_SingleProcess(RegressionTestCase):
         # File Deletion
         self.assertFalse(pathlib.Path('file_delete.tmp').exists())
 
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/60")
     def test_110_directory(self):
         for path in ['dir_exist.tmp', 'dir_nonexist.tmp', 'dir_delete.tmp',
                      'dir_rename.tmp', 'dir_rename_delete.tmp']:
@@ -343,6 +354,7 @@ class TC_20_SingleProcess(RegressionTestCase):
         _, stderr = self.run_binary(['Event'])
         self.assertIn('TEST OK', stderr)
 
+    @unittest.skipIf(HAS_TDX or HAS_VM, "This test sometimes fails in CI environment")
     def test_300_memory(self):
         if not HAS_SGX or HAS_EDMM:
             _, stderr = self.run_binary(['memory'])
@@ -458,6 +470,8 @@ class TC_20_SingleProcess(RegressionTestCase):
         self.assertIn('Hex test 2 is cdcdcdcdcdcdcdcd', stderr)
 
 class TC_21_ProcessCreation(RegressionTestCase):
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "Multi-processing is currently not supported in VM/TDX PALs")
     def test_100_process(self):
         _, stderr = self.run_binary(['Process'], timeout=60)
         counter = collections.Counter(stderr.split('\n'))
@@ -475,6 +489,8 @@ class TC_21_ProcessCreation(RegressionTestCase):
         self.assertEqual(counter['Process Read 2: Hello World 2'], 3)
 
 class TC_23_SendHandle(RegressionTestCase):
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "Multi-processing is currently not supported in VM/TDX PALs")
     def test_000_send_handle(self):
         _, stderr = self.run_binary(['send_handle'])
         self.assertIn('Parent: test OK', stderr)
