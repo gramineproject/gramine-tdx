@@ -1,4 +1,4 @@
-stage('test-vm') {
+stage('test-tdx') {
     try {
         timeout(time: 5, unit: 'MINUTES') {
             // Skip CI-Examples for VM/TDX runs

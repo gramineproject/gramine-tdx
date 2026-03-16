@@ -29,7 +29,9 @@ int main(void) {
     }
 
     memset(groups, 0, sizeof(groups));
+    const char* process = "parent";
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     pid_t pid = fork();
     if (pid < 0) {
         err(1, "fork");
@@ -42,6 +44,8 @@ int main(void) {
             errx(1, "invalid child return status: %d", status);
         }
     }
+    process = pid ? "parent" : "child";
+#endif
 
     x = getgroups(ARRAY_LEN(groups), groups);
     if (x < 0) {
@@ -56,7 +60,6 @@ int main(void) {
         }
     }
 
-    printf("%s OK\n", pid == 0 ? "child" : "parent");
+    printf("%s OK\n", process);
     return 0;
 }
-

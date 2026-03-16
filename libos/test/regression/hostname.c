@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 static void test_fork(const char* tag, const char* expected_name,
                       void (*f)(const char*, const char*)) {
     int status;
@@ -29,6 +30,7 @@ static void test_fork(const char* tag, const char* expected_name,
         errx(1, "%s: exit status of child is not zero", tag);
     }
 }
+#endif
 
 static void test_gethostname(const char* tag, const char* expected_name) {
     char buf[512] = {0};
@@ -50,7 +52,9 @@ int main(int argc, char** argv) {
     }
 
     test_gethostname("gethostname", argv[1]);
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     test_fork("gethostname after fork", argv[1], test_gethostname);
+#endif
 
     printf("TEST OK\n");
     return 0;

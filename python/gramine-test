@@ -16,7 +16,9 @@ def change_dir(_ctx, _param, value):
         os.chdir(value)
 
 @click.group(help='Helper program for running Gramine tests.')
-@click.option('--sgx/--no-sgx', default=(os.environ.get('SGX') == '1'),
+@click.option('--sgx/--no-sgx',
+              default=(os.environ.get('SGX') == '1' or
+                       os.environ.get('TDX') == '1'),
               help='Enable SGX mode (you can also set SGX=1 before running)')
 @click.option('--conf-file-name', '-n', type=click.Path(exists=True, dir_okay=False),
               default='tests.toml', help='Configuration file name to use')

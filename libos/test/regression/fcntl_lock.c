@@ -123,6 +123,7 @@ static bool try_lock(int cmd, int type, int whence, long int start, long int len
     }
 }
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 /* Check whether F_GETLK returns the right conflicting lock. */
 static void lock_check(int type, long int start, long int len, int conflict_type,
                        long int conflict_start, long int conflict_len) {
@@ -144,6 +145,7 @@ static void lock_check(int type, long int start, long int len, int conflict_type
              str_type(conflict_type), conflict_start, conflict_len);
     }
 }
+#endif
 
 static void unlock(long int start, long int len) {
     if (!try_lock(F_SETLK, F_UNLCK, SEEK_SET, start, len))
@@ -158,6 +160,7 @@ static void lock(int type, long int start, long int len) {
         errx(1, "setting %s failed", str_type(type));
 }
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 static void lock_wait_ok(int type, long int start, long int len) {
     if (!try_lock(F_SETLKW, type, SEEK_SET, start, len))
         errx(1, "waiting for %s failed", str_type(type));
@@ -168,6 +171,7 @@ static void lock_fail(int type, long int start, long int len) {
             || try_lock(F_SETLK, type, SEEK_SET, start, len))
         errx(1, "setting %s succeeded unexpectedly", str_type(type));
 }
+#endif
 
 /*
  * Test: lock/unlock various ranges. The locks are all for the same process, so the test is unlikely
@@ -195,6 +199,7 @@ static void test_ranges(void) {
     lock(F_WRLCK, 30, 30);
 }
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 static void wait_for_child(void) {
     int ret;
     do {
@@ -437,6 +442,7 @@ static void test_parent_wait_child_cloexec(void) {
     wait_for_child();
     close_pipes(pipes);
 }
+#endif
 
 
 int main(void) {
@@ -447,12 +453,14 @@ int main(void) {
         err(1, "open");
 
     test_ranges();
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     test_child_exit();
     test_file_close();
     test_child_wait();
     test_parent_wait();
     test_parent_wait_child_cloexec();
     test_range_with_eof();
+#endif
 
     if (close(g_fd) < 0)
         err(1, "close");

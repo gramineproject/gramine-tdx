@@ -120,6 +120,7 @@ int main(int argc, char** argv) {
     write_key("writing key", CUSTOM_KEY_PATH, &new_custom_key);
     expect_key("after writing key", CUSTOM_KEY_PATH, &new_custom_key);
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     /* Check if the child process will see the updated key. */
     pid_t pid = fork();
     if (pid < 0)
@@ -127,16 +128,18 @@ int main(int argc, char** argv) {
     if (pid == 0) {
         expect_key("in child process", DEFAULT_KEY_PATH, &default_key);
         expect_key("in child process", CUSTOM_KEY_PATH, &new_custom_key);
-    } else {
-        int status;
-        if (waitpid(pid, &status, 0) == -1)
-            err(1, "waitpid");
-        if (!WIFEXITED(status))
-            errx(1, "child not exited");
-        if (WEXITSTATUS(status) != 0)
-            errx(1, "unexpected exit status: %d", WEXITSTATUS(status));
-        printf("TEST OK\n");
+        return 0;
     }
+
+    int status;
+    if (waitpid(pid, &status, 0) == -1)
+        err(1, "waitpid");
+    if (!WIFEXITED(status))
+        errx(1, "child not exited");
+    if (WEXITSTATUS(status) != 0)
+        errx(1, "unexpected exit status: %d", WEXITSTATUS(status));
+#endif
+    printf("TEST OK\n");
 
     return 0;
 }
