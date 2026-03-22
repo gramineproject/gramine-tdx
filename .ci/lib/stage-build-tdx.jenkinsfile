@@ -56,6 +56,11 @@ stage('build') {
 
     try {
         sh '''
+            # TODO: drop `-Dsgx=enabled` once Meson supports VM-only/TDX-only
+            # builds without assuming a linkable PAL library:
+            # https://github.com/gramineproject/gramine-tdx/issues/62
+            # Also keep this until confidential-computing tools such as
+            # `gramine-sgx-sign` work with TDX-only builds.
             meson setup build/ \
                 --werror \
                 --prefix="$PREFIX" \

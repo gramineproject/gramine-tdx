@@ -39,7 +39,8 @@ class TC_00_Basic(RegressionTestCase):
 class TC_00_BasicSet2(RegressionTestCase):
     @unittest.skipUnless(ON_X86, "x86-specific")
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Known issue: https://github.com/gramineproject/gramine-tdx/issues/64")
+        "TODO: re-enable after PAL/vm-common forwards arithmetic exceptions to LibOS "
+        "(see https://github.com/gramineproject/gramine-tdx/issues/64)")
     def test_Exception2(self):
         _, stderr = self.run_binary(['Exception2'])
         self.assertIn('Enter Main Thread', stderr)
@@ -210,7 +211,8 @@ class TC_10_Exception(RegressionTestCase):
 
     @unittest.skipUnless(ON_X86, "x86-specific")
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Known issue: https://github.com/gramineproject/gramine-tdx/issues/64")
+        "TODO: re-enable after PAL/vm-common forwards arithmetic exceptions to LibOS "
+        "(see https://github.com/gramineproject/gramine-tdx/issues/64)")
     def test_000_exception(self):
         try:
             _, stderr = self.run_binary(['Exception'])
@@ -305,7 +307,8 @@ class TC_20_SingleProcess(RegressionTestCase):
         self.assertFalse(pathlib.Path('file_delete.tmp').exists())
 
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/60")
+        "TODO: re-enable after PAL/vm-common supports file attribute queries by nodeid "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/60)")
     def test_110_directory(self):
         for path in ['dir_exist.tmp', 'dir_nonexist.tmp', 'dir_delete.tmp',
                      'dir_rename.tmp', 'dir_rename_delete.tmp']:
