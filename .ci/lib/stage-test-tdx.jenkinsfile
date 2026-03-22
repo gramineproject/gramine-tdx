@@ -1,7 +1,8 @@
 stage('test-tdx') {
     try {
         timeout(time: 5, unit: 'MINUTES') {
-            // Skip CI-Examples for VM/TDX runs
+            // TODO: re-enable CI-Examples in this stage after identifying
+            // examples compatible with the TDX environment.
         }
     } finally {
         sh '''

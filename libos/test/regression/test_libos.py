@@ -33,7 +33,8 @@ class TC_00_Unittests(RegressionTestCase):
         self.assertIn('Test successful!', stdout)
 
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/61")
+        "TODO: re-enable after gramine_call() uses the syscall instruction path in VM/TDX builds "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_001_rwlock(self):
         # You may need to adjust sgx.max_threads in the manifest when changing these
         instances = 5
@@ -46,7 +47,8 @@ class TC_00_Unittests(RegressionTestCase):
         self.assertIn('TEST OK', stdout)
 
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/61")
+        "TODO: re-enable after gramine_call() uses the syscall instruction path in VM/TDX builds "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_010_gramine_run_test(self):
         stdout, _ = self.run_binary(['run_test', 'pass'])
         self.assertIn('gramine_run_test("pass") = 0', stdout)
@@ -707,7 +709,8 @@ class TC_30_Syscall(RegressionTestCase):
         self.assertIn('getdents64 2: file5', stdout)
 
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/60")
+        "TODO: re-enable after PAL/vm-common supports file attribute queries by nodeid "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/60)")
     def test_023_readdir(self):
         stdout, _ = self.run_binary(['readdir'])
         self.assertIn('test completed successfully', stdout)
@@ -833,8 +836,9 @@ class TC_30_Syscall(RegressionTestCase):
         # Futex Wake Test
         self.assertIn('Woke all kiddos', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/61")
+    @unittest.skipIf(HAS_TDX,
+        "TODO: re-enable after TDX builds include the vDSO "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_041_futex_timeout(self):
         stdout, _ = self.run_binary(['futex_timeout'])
 
@@ -1021,7 +1025,8 @@ class TC_30_Syscall(RegressionTestCase):
         self.assertIn('TEST OK', stdout)
 
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/59")
+        "TODO: re-enable after PAL/vm-common correctly detects closed read ends in pipes "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/59)")
     def test_092_sighandler_sigpipe(self):
         try:
             self.run_binary(['sighandler_sigpipe'])
@@ -1037,7 +1042,8 @@ class TC_30_Syscall(RegressionTestCase):
 
     @unittest.skipUnless(ON_X86, "x86-specific")
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Known issue: https://github.com/gramineproject/gramine-tdx/issues/64")
+        "TODO: re-enable after PAL/vm-common forwards arithmetic exceptions to LibOS "
+        "(see https://github.com/gramineproject/gramine-tdx/issues/64)")
     def test_093_sighandler_divbyzero(self):
         stdout, _ = self.run_binary(['sighandler_divbyzero'])
         self.assertIn('Got signal %d' % signal.SIGFPE, stdout)
@@ -1068,8 +1074,9 @@ class TC_30_Syscall(RegressionTestCase):
         stdout, _ = self.run_binary(['pthread_set_get_affinity', '1000'])
         self.assertIn('TEST OK', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Fixed in https://github.com/gramineproject/gramine-tdx/pull/61")
+    @unittest.skipIf(HAS_TDX,
+        "TODO: re-enable after TDX builds include the vDSO "
+        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_103_gettimeofday(self):
         stdout, _ = self.run_binary(['gettimeofday'])
         self.assertIn('TEST OK', stdout)
@@ -1247,7 +1254,8 @@ class TC_40_FileSystem(RegressionTestCase):
         self.assertIn('TEST OK', stdout)
 
     @unittest.skipIf(HAS_TDX or HAS_VM,
-                     "TODO: Known issue: https://github.com/gramineproject/gramine-tdx/issues/63")
+        "TODO: re-enable after the VM launcher preserves argv boundaries "
+        "(see https://github.com/gramineproject/gramine-tdx/issues/63)")
     def test_020_cpuinfo(self):
         with open('/proc/cpuinfo') as file_:
             cpuinfo = file_.read().strip().split('\n\n')[-1]
@@ -1279,7 +1287,7 @@ class TC_40_FileSystem(RegressionTestCase):
         # On VM/TDX, open_fds_limit also constrains host-side virtiofsd.
         # virtiofsd reserves 610 fds internally (509 + 100 + max(thread_pool_size, 1)),
         # so use 660 here to preserve the 50 fds budget for this test.
-        # https://gitlab.com/virtio-fs/virtiofsd/-/blob/main/src/main.rs#L51
+        # https://gitlab.com/virtio-fs/virtiofsd/-/blob/7250c773/src/main.rs#L51
         open_fds_limit = 660 if (HAS_TDX or HAS_VM) else 50
         stdout, _ = self.run_binary(['fdleak'], timeout=40, open_fds_limit=open_fds_limit)
         self.assertIn("TEST OK", stdout)
@@ -1433,7 +1441,7 @@ class TC_50_GDB(RegressionTestCase):
         self.assertTrue(match, '{} not found in GDB output'.format(name))
         return match.group(1).strip()
 
-    @unittest.skipIf(HAS_TDX or HAS_VM, "GDB is currently not supported in TDX PAL")
+    @unittest.skipIf(HAS_TDX, "GDB is currently not supported in TDX PAL")
     def test_000_gdb_backtrace(self):
         # To run this test manually, use:
         # GDB=1 GDB_SCRIPT=debug.gdb gramine-{direct|sgx} debug
@@ -1443,7 +1451,21 @@ class TC_50_GDB(RegressionTestCase):
         # While the stack trace in SGX is unbroken, it currently starts at _start inside
         # enclave, instead of including eclave entry.
 
-        stdout, _ = self.run_gdb(['debug'], 'debug.gdb')
+        gdb_script = 'debug_vm.gdb' if HAS_VM else 'debug.gdb'
+        stdout, _ = self.run_gdb(['debug'], gdb_script)
+
+        if HAS_VM:
+            # VM PAL does not yet implement debug_map for runtime-loaded libraries, so
+            # backtrace checks across libc do not work on VM.
+            backtrace_1 = self.find('backtrace 1', stdout)
+            self.assertIn(' func ()', backtrace_1)
+            self.assertIn(' main ()', backtrace_1)
+            self.assertIn('debug.c', backtrace_1)
+
+            backtrace_2 = self.find('backtrace 2', stdout)
+            self.assertIn(' pal_common_console_write (', backtrace_2)
+            self.assertIn('pal_common_console.c', backtrace_2)
+            return
 
         backtrace_1 = self.find('backtrace 1', stdout)
         self.assertIn(' main ()', backtrace_1)
@@ -1473,7 +1495,8 @@ class TC_50_GDB(RegressionTestCase):
                 self.assertNotIn('??', backtrace_3)
 
     @unittest.skipUnless(ON_X86, 'x86-specific')
-    @unittest.skipIf(HAS_TDX or HAS_VM, "GDB is currently not supported in TDX PAL")
+    @unittest.skipIf(HAS_TDX, "GDB is currently not supported in TDX PAL")
+    @unittest.skipIf(HAS_VM, "#BP is currently not handled in VM PAL")
     def test_010_regs_x86_64(self):
         # To run this test manually, use:
         # GDB=1 GDB_SCRIPT=debug_regs_x86_64.gdb gramine-{direct|sgx} debug_regs_x86_64

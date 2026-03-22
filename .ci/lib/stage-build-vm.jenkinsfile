@@ -41,6 +41,9 @@ stage('build') {
 
     try {
         sh '''
+            # TODO: drop `-Ddirect=enabled` once Meson supports VM-only/TDX-only
+            # builds without assuming a linkable PAL library:
+            # https://github.com/gramineproject/gramine-tdx/issues/62
             meson setup build/ \
                 --werror \
                 --prefix="$PREFIX" \
