@@ -157,17 +157,32 @@ QEMU_VIRTIO_FS="-chardev socket,path=/tmp/gramine_vhostfs_"$GRAMINE_VM_ID",id=vh
 QEMU_VIRTIO_VSOCK="-device vhost-vsock-pci,iommu_platform=off,guest-cid="$GRAMINE_VM_ID",id=vsockdev"
 
 # Due to QEMU syntax, commas in the QEMU cmdline need to be escaped using an additional comma.
-APPLICATION=${APPLICATION//","/",,"}
-GRAMINE_ARGS="-gramine-args init \"$APPLICATION\" $@ -gramine-args-end"
-
-GRAMINE_ENVS=$(python3 -c "
+gramine_vars="$(python3 - "$APPLICATION" "$@" <<'PY'
 import os
-env_str = ''
-for name, value in os.environ.items():
-    env_str += ('\"{0}={1}\" '.format(name, value).replace(',', ',,'))
-print(env_str)
-")
-GRAMINE_ENVS="-gramine-envs $GRAMINE_ENVS -gramine-envs-end"
+import shlex
+import sys
+
+def serialize_item(item):
+    return '"{0}"'.format(item.replace('\\', '\\\\').replace('"', '\\"').replace(',', ',,'))
+
+gramine_args = '-gramine-args {0} -gramine-args-end'.format(
+    ' '.join(serialize_item(arg) for arg in ['init'] + sys.argv[1:])
+)
+
+gramine_envs = '-gramine-envs {0} -gramine-envs-end'.format(
+    ' '.join(serialize_item('{0}={1}'.format(name, value)) for name, value in os.environ.items())
+)
+
+print('GRAMINE_ARGS={0}'.format(shlex.quote(gramine_args)))
+print('GRAMINE_ENVS={0}'.format(shlex.quote(gramine_envs)))
+PY
+)"
+status=$?
+if [ $status -ne 0 ]; then
+    echo "Error: Python script for serializing args/envs exited with status: $status"
+    exit $status
+fi
+eval "$gramine_vars"
 
 CMD=("${ENVS[@]}")
 CMD+=("${PREFIX[@]}")

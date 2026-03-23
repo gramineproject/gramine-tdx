@@ -26,9 +26,10 @@
  *   - wiki.osdev.org/QEMU_fw_cfg
  *
  * The arguments must be in the following format:
- *    "-gramine-args init argv0 argv1 ... -gramine-args-end"
-  * The environment variables must be in the following format:
+ *    "-gramine-args "init" "argv0" "argv1" ... -gramine-args-end"
+ * The environment variables must be in the following format:
  *    "-gramine-envs "KEY1=VAL1" "KEY2=VAL2" ... -gramine-envs-end"
+ * Double-quoted items support escaping `"` and `\` as `\"` and `\\`.
  */
 
 #pragma once
