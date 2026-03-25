@@ -2,7 +2,8 @@ stage('test-vm') {
     try {
         timeout(time: 5, unit: 'MINUTES') {
             // TODO: re-enable CI-Examples in this stage after identifying
-            // examples compatible with the VM environment.
+            // examples compatible with the VM environment:
+            // https://github.com/gramineproject/gramine-tdx/issues/66
         }
     } finally {
         sh '''

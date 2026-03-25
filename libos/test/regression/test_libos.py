@@ -1455,8 +1455,9 @@ class TC_50_GDB(RegressionTestCase):
         stdout, _ = self.run_gdb(['debug'], gdb_script)
 
         if HAS_VM:
-            # VM PAL does not yet implement debug_map for runtime-loaded libraries, so
-            # backtrace checks across libc do not work on VM.
+            # TODO: VM PAL does not yet implement debug_map for runtime-loaded libraries, so
+            # backtrace checks across libc do not work on VM:
+            # https://github.com/gramineproject/gramine-tdx/issues/67
             backtrace_1 = self.find('backtrace 1', stdout)
             self.assertIn(' func ()', backtrace_1)
             self.assertIn(' main ()', backtrace_1)
@@ -1496,7 +1497,8 @@ class TC_50_GDB(RegressionTestCase):
 
     @unittest.skipUnless(ON_X86, 'x86-specific')
     @unittest.skipIf(HAS_TDX, "GDB is currently not supported in TDX PAL")
-    @unittest.skipIf(HAS_VM, "#BP is currently not handled in VM PAL")
+    @unittest.skipIf(HAS_VM, "TODO: #BP is currently not handled in VM PAL "
+                             "(see https://github.com/gramineproject/gramine-tdx/issues/67)")
     def test_010_regs_x86_64(self):
         # To run this test manually, use:
         # GDB=1 GDB_SCRIPT=debug_regs_x86_64.gdb gramine-{direct|sgx} debug_regs_x86_64

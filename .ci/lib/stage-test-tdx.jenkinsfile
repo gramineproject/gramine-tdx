@@ -2,7 +2,8 @@ stage('test-tdx') {
     try {
         timeout(time: 5, unit: 'MINUTES') {
             // TODO: re-enable CI-Examples in this stage after identifying
-            // examples compatible with the TDX environment.
+            // examples compatible with the TDX environment:
+            // https://github.com/gramineproject/gramine-tdx/issues/66
         }
     } finally {
         sh '''
