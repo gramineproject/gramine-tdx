@@ -23,11 +23,38 @@ char g_host_pwd[PATH_MAX];
 char g_cmdline[MAX_ARGV_SIZE];
 char g_envs[MAX_ENVS_SIZE];
 
+static int cmdline_read_escaped_token(char** p_ptr) {
+    char* read_ptr = *p_ptr;
+    char* write_ptr = read_ptr;
+
+    while (true) {
+        if (*read_ptr == '\0')
+            return -PAL_ERROR_INVAL;
+
+        if (*read_ptr == '"') {
+            *write_ptr = '\0';
+            *p_ptr = read_ptr + 1;
+            if (**p_ptr != ' ')
+                return -PAL_ERROR_INVAL;
+            return 0;
+        }
+
+        if (*read_ptr == '\\') {
+            read_ptr++;
+            if (*read_ptr != '"' && *read_ptr != '\\')
+                return -PAL_ERROR_INVAL;
+        }
+
+        *write_ptr++ = *read_ptr++;
+    }
+}
+
 /* This function copies `input` to a new string (we don't want to modify `input`) and splits the
- * new line in NUL-terminated sub-strings (arguments). Each argument may be enclosed in
- * double-quotes; in this case everything between the double-quotes (including whitespaces) is
- * considered as one argument. Having an argument without a closing double-quote leads to error. No
- * escaping is supported (e.g., `\"` is not allowed). */
+ * new line into NUL-terminated sub-strings (arguments). Each argument must be enclosed in
+ * double-quotes; everything between the double-quotes (including whitespaces) is considered one
+ * argument. Inside a quoted argument, only `\"` and `\\` escapes are supported. Parsing stops at
+ * the unquoted `end_str` marker; malformed quoting, unsupported escapes, or a missing end marker
+ * lead to error. */
 static int cmdline_read_common(enum cmdline_parse_type type, const char* input, int* out_cnt,
                                const char** out_array) {
     /* Choose the appropriate starting and ending string as well as the max token size for
@@ -64,49 +91,39 @@ static int cmdline_read_common(enum cmdline_parse_type type, const char* input, 
         goto out;
     }
 
-    char* p_end = strstr(p, end_str);
-    if (!p_end) {
-        ret = -PAL_ERROR_INVAL;
-        goto out;
-    }
-
-    /* do not count the end_str (e.g. `-gramine-args-end`) and everything after it as arguments */
-    *p_end = '\0';
-
     p += strlen(begin_str);
-    while (p) {
-        while (*p == ' ' || *p == '\t')
+    while (true) {
+        while (*p == ' ')
             p++;
-        if (*p == '\0')
-            break;
+        if (*p == '\0') {
+            ret = -PAL_ERROR_INVAL;
+            goto out;
+        }
+
+        if (*p != '"') {
+            size_t token_len = 0;
+            while (p[token_len] != '\0')
+                token_len++;
+            if (token_len == strlen(end_str) && memcmp(p, end_str, token_len) == 0) {
+                p += token_len;
+                break;
+            }
+            ret = -PAL_ERROR_INVAL;
+            goto out;
+        }
 
         if (curr_cnt == max_tokens) {
             ret = -PAL_ERROR_NOMEM;
             goto out;
         }
 
-        bool token_in_double_quotes = false;
-        if (*p == '"') {
-            p++;
-            token_in_double_quotes = true;
-        }
 
-        out_array[curr_cnt] = p;
+        out_array[curr_cnt] = ++p;
         curr_cnt++;
 
-        if (token_in_double_quotes) {
-            while (*p != '\0' && *p != '"')
-                p++;
-            if (*p == '\0') {
-                ret = -PAL_ERROR_INVAL;
-                goto out;
-            }
-            *p++ = '\0'; /* replace closing double-quote with NUL */
-        } else {
-            while (*p != '\0' && *p != ' ' && *p != '\t')
-                p++;
-            *p++ = '\0'; /* replace whitespace with NUL */
-        }
+        ret = cmdline_read_escaped_token(&p);
+        if (ret < 0)
+            goto out;
     }
 
     /* items of out_array point into `input_copy` buffer */
