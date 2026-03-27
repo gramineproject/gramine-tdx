@@ -1253,9 +1253,6 @@ class TC_40_FileSystem(RegressionTestCase):
             self.assertIn('Hello World (exec_victim)!', stdout) 
         self.assertIn('TEST OK', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM,
-        "TODO: re-enable after the VM launcher preserves argv boundaries "
-        "(see https://github.com/gramineproject/gramine-tdx/issues/63)")
     def test_020_cpuinfo(self):
         with open('/proc/cpuinfo') as file_:
             cpuinfo = file_.read().strip().split('\n\n')[-1]

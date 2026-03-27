@@ -330,13 +330,14 @@ class RegressionTestCase(unittest.TestCase):
 
     def build_vm_command(self, args, *, prefix=None, run_gdb=False, env=None, gdb_port=9000):
         application, rest = args[0], list(args[1:])
+        launch_env = os.environ if env is None else env
 
         qemu_gdb = (f'-gdb tcp::{gdb_port} -S' if run_gdb else '')
 
         def pick_mem():
             import re
 
-            manifest_base = os.environ.get('GRAMINE_MANIFEST', f'{application}.manifest')
+            manifest_base = f'{application}.manifest'
             manifests = {
                 'tdx': manifest_base + '.tdx',
                 'sgx': manifest_base + '.sgx',
@@ -353,7 +354,7 @@ class RegressionTestCase(unittest.TestCase):
                 except Exception:
                     continue
             else:
-                return (os.environ.get('GRAMINE_RAM_SIZE') or '8G')
+                return (launch_env.get('GRAMINE_RAM_SIZE') or '8G')
 
             unit = 1
             if size_str.endswith('G'):
@@ -367,11 +368,11 @@ class RegressionTestCase(unittest.TestCase):
                 size = int(re.search(r'\d+', size_str).group())
                 return size_str if unit * size > 1024 * 1024 * 1024 else '1G'
             except Exception:
-                return (os.environ.get('GRAMINE_RAM_SIZE') or '8G')
+                return (launch_env.get('GRAMINE_RAM_SIZE') or '8G')
 
         mem_size = pick_mem()
-        cpu_num = (os.environ.get('QEMU_CPU_NUM')
-                   or os.environ.get('GRAMINE_CPU_NUM')
+        cpu_num = (launch_env.get('QEMU_CPU_NUM')
+                   or launch_env.get('GRAMINE_CPU_NUM')
                    or '1')
 
         qemu = 'qemu'
@@ -445,28 +446,21 @@ class RegressionTestCase(unittest.TestCase):
                                f'-device vhost-user-fs-pci,iommu_platform=off,queue-size=1024,chardev=vhostfs,tag=graminefs')
         qemu_virtio_vsock   = (f'-device vhost-vsock-pci,iommu_platform=off,guest-cid={gramine_vm_id},id=vsockdev')
 
-        def encode_gramine_arg(arg):
-            arg = fspath(arg)
-            if '"' in arg:
-                raise ValueError(f'double quotes are not supported in Gramine VM arguments: {arg}')
-            return f'"{arg.replace(",", ",,")}"'
+        def serialize_item(item):
+            escaped = item.replace('\\', '\\\\').replace('"', '\\"').replace(',', ',,')
+            return f'"{escaped}"'
 
-        gramine_args = '-gramine-args init ' + ' '.join(
-            encode_gramine_arg(arg) for arg in [application, *rest]
-        ) + ' -gramine-args-end'
+        gramine_args = (
+            '-gramine-args '
+            f"{' '.join(serialize_item(arg) for arg in ['init', application, *rest])} "
+            '-gramine-args-end'
+        )
 
-        def get_envs(env):
-            # Build -gramine-envs payload from a provided mapping (no os.environ)
-            # to prevent malformed env vars in CI from causing build_envs() to fail.
-            if not env:
-                return ""
-            parts = []
-            for name, value in env.items():
-                v = str(value).replace(',', ',,')
-                parts.append(f'"{name}={v}"')
-            return " ".join(parts)
-
-        gramine_envs = '-gramine-envs ' + get_envs(env) + ' -gramine-envs-end'
+        gramine_envs = (
+            '-gramine-envs '
+            f"{' '.join(serialize_item(f'{k}={v}') for k, v in launch_env.items())} "
+            '-gramine-envs-end'
+        )
 
         if prefix is None:
             prefix = []
@@ -517,11 +511,12 @@ class RegressionTestCase(unittest.TestCase):
 
         return ['bash', '-c', shell_line], gramine_vm_id
 
-    def run_gdb_vm(self, args, gdb_script, *, timeout=None, env=None, **kwds):
+    def run_gdb_vm(self, args, gdb_script, *, timeout=None, **kwds):
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
                    else self.DEFAULT_TIMEOUT)
         deadline = time.time() + timeout
         gdb_port = 9000
+        env = kwds.get('env')
         cmd, gramine_vm_id = self.build_vm_command(
             args, prefix=None, run_gdb=True, env=env, gdb_port=gdb_port)
 
@@ -613,10 +608,11 @@ class RegressionTestCase(unittest.TestCase):
         return stdout, stderr
 
     # mirror gramine-vm.in
-    def run_vm(self, args, *, timeout=None, prefix=None, run_gdb=False, env=None, **kwds):
+    def run_vm(self, args, *, timeout=None, prefix=None, **kwds):
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
                    else self.DEFAULT_TIMEOUT)
-        cmd, gramine_vm_id = self.build_vm_command(args, prefix=prefix, run_gdb=run_gdb, env=env)
+        env = kwds.get('env')
+        cmd, gramine_vm_id = self.build_vm_command(args, prefix=prefix, env=env)
         try:
             host_returncode, stdout, raw_stderr = run_command(
                 cmd, timeout=timeout, can_fail=True, **kwds)
@@ -634,10 +630,10 @@ class RegressionTestCase(unittest.TestCase):
                 returncode, args, encode_output(stdout), encode_output(stderr))
         return stdout, stderr
 
-    def run_binary(self, args, *, timeout=None, prefix=None, env=None, **kwds):
+    def run_binary(self, args, *, timeout=None, prefix=None, **kwds):
         # VM/TDX path (QEMU)
         if HAS_VM or HAS_TDX:
-            return self.run_vm(args, timeout=timeout, prefix=prefix, run_gdb=False, env=env, **kwds)
+            return self.run_vm(args, timeout=timeout, prefix=prefix, **kwds)
 
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
             else self.DEFAULT_TIMEOUT)
