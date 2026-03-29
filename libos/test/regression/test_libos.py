@@ -1352,14 +1352,44 @@ class TC_50_GDB(RegressionTestCase):
 
     def test_000_gdb_backtrace(self):
         # To run this test manually, use:
-        # GDB=1 GDB_SCRIPT=debug.gdb gramine-{direct|sgx} debug
+        # Direct/SGX:
+        #   GDB=1 GDB_SCRIPT=debug.gdb gramine-{direct|sgx} debug
+        # VM (two terminals):
+        #   In the first terminal, launch gramine-vm with GDB enabled:
+        #     GDB=1 gramine-vm debug
+        #   In the second terminal, first get the debug binary's `.text` address:
+        #     APP_TEXT_ADDR=$(objdump -h /path/to/debug | awk '$2 == ".text" { print "0x" $4 }')
+        #   Then launch gdb:
+        #     gdb \
+        #         -ex "file /path/to/vm/pal" \
+        #         -ex "target remote localhost:9000" \
+        #         -ex "add-symbol-file /path/to/debug $APP_TEXT_ADDR" \
+        #         -x debug_vm.gdb \
+        #         -batch \
+        #         -tty=/dev/null
+        # TDX: currently unsupported.
         #
         # TODO: strengthen this test after SGX includes enclave entry.
         #
         # While the stack trace in SGX is unbroken, it currently starts at _start inside
         # enclave, instead of including eclave entry.
 
-        stdout, _ = self.run_gdb(['debug'], 'debug.gdb')
+        gdb_script = 'debug_vm.gdb' if HAS_VM else 'debug.gdb'
+        stdout, _ = self.run_gdb(['debug'], gdb_script)
+
+        if HAS_VM:
+            # TODO: VM PAL does not yet implement debug_map for runtime-loaded libraries, so
+            # backtrace checks across libc do not work on VM:
+            # https://github.com/gramineproject/gramine-tdx/issues/67
+            backtrace_1 = self.find('backtrace 1', stdout)
+            self.assertIn(' func ()', backtrace_1)
+            self.assertIn(' main ()', backtrace_1)
+            self.assertIn('debug.c', backtrace_1)
+
+            backtrace_2 = self.find('backtrace 2', stdout)
+            self.assertIn(' pal_common_console_write (', backtrace_2)
+            self.assertIn('pal_common_console.c', backtrace_2)
+            return
 
         backtrace_1 = self.find('backtrace 1', stdout)
         self.assertIn(' main ()', backtrace_1)

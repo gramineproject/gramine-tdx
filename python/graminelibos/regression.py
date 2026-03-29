@@ -163,6 +163,39 @@ def run_command(cmd, *, timeout, open_fds_limit=None, can_fail=False, **kwds):
 
         return main_returncode, stdout, stderr
 
+def wait_for_vm_gdbstub(host, port, deadline, proc=None):
+    while True:
+        if proc is not None:
+            proc.poll()
+            if proc.returncode is not None:
+                return False
+
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return False
+
+        try:
+            with socket.create_connection((host, port), timeout=min(0.5, remaining)):
+                return True
+        except OSError:
+            time.sleep(min(0.1, remaining))
+
+def get_elf_section_addr(path, section_name):
+    try:
+        from elftools.elf.elffile import ELFFile
+    except ImportError:
+        print(
+            'Python elftools module not found, please install (e.g. apt install python3-pyelftools)'
+        )
+        raise
+
+    with open(path, 'rb') as f:
+        elf = ELFFile(f)
+        section = elf.get_section_by_name(section_name)
+
+    if section is None:
+        raise ValueError(f'section {section_name} not found in {path}')
+    return int(section.header['sh_addr'])
 
 class RegressionTestCase(unittest.TestCase):
     DEFAULT_TIMEOUT = (20 if HAS_SGX else 10)
@@ -193,6 +226,10 @@ class RegressionTestCase(unittest.TestCase):
         return '.debug_info' in dump
 
     def run_gdb(self, args, gdb_script, **kwds):
+        if HAS_VM:
+            return self.run_gdb_vm(args, gdb_script, **kwds)
+        elif HAS_TDX:
+            self.fail('GDB is currently not supported in TDX PAL')
         prefix = ['gdb', '-q']
         env = os.environ.copy()
         if HAS_SGX:
@@ -207,6 +244,102 @@ class RegressionTestCase(unittest.TestCase):
         prefix += ['--args']
 
         return self.run_binary(args, prefix=prefix, env=env, **kwds)
+
+    def run_gdb_vm(self, args, gdb_script, *, timeout=None, **kwds):
+        timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
+                   else self.DEFAULT_TIMEOUT)
+        deadline = time.time() + timeout
+        gdb_port = 9000
+        env = kwds.get('env')
+        cmd, gramine_vm_id = self.build_vm_command(
+            args, prefix=None, run_gdb=True, env=env, gdb_port=gdb_port)
+
+        open_fds_limit = kwds.pop('open_fds_limit', None)
+        gdb_stdout = ''
+        gdb_stderr = ''
+        gdb_returncode = 0
+        gdb_wrapper_path = None
+
+        with tempfile.TemporaryFile() as vm_stdout_file, tempfile.TemporaryFile() as vm_stderr_file:
+            vm_proc = subprocess.Popen(
+                cmd,
+                stdout=vm_stdout_file,
+                stderr=vm_stderr_file,
+                preexec_fn=lambda: set_open_fds_limit(open_fds_limit),
+                start_new_session=True,
+                **kwds,
+            )
+            try:
+                if not wait_for_vm_gdbstub('127.0.0.1', gdb_port, deadline, proc=vm_proc):
+                    raise AssertionError(
+                        f'VM gdb stub on port {gdb_port} did not become ready before the VM exited')
+
+                with tempfile.NamedTemporaryFile(
+                        mode='w', encoding='utf-8', suffix='.gdb', delete=False) as gdb_wrapper:
+                    gdb_wrapper.write('set confirm off\n')
+                    gdb_wrapper.write(f'file {fspath(self.libpal_vm_path)}\n')
+                    gdb_wrapper.write(f'target remote 127.0.0.1:{gdb_port}\n')
+                    app_binary = (pathlib.Path(graminelibos._CONFIG_PKGLIBDIR) / 'tests' /
+                                  'libos' / 'regression' / args[0])
+                    app_text_addr = get_elf_section_addr(app_binary, '.text')
+                    gdb_wrapper.write(
+                        f'add-symbol-file {fspath(app_binary)} 0x{app_text_addr:x}\n')
+                    gdb_wrapper.write(f'source {gdb_script}\n')
+                    gdb_wrapper_path = gdb_wrapper.name
+
+                time_remaining = deadline - time.time()
+
+                gdb_cmd = ['gdb', '-q', '-x', gdb_wrapper_path, '-batch', '-tty=/dev/null']
+                gdb_returncode, gdb_stdout, gdb_stderr = run_command(
+                    gdb_cmd, timeout=time_remaining, can_fail=True)
+
+                time_remaining = deadline - time.time()
+                if time_remaining <= 0:
+                    raise AssertionError(f'Command {args} timed out after {timeout} s')
+
+                vm_proc.wait(time_remaining)
+            except subprocess.TimeoutExpired as e:
+                raise AssertionError(f'Command {args} timed out after {timeout} s') from e
+            finally:
+                if gdb_wrapper_path is not None:
+                    try:
+                        os.unlink(gdb_wrapper_path)
+                    except FileNotFoundError:
+                        pass
+
+                try:
+                    os.killpg(vm_proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    vm_proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                cleanup_vm(gramine_vm_id)
+
+            vm_stdout_file.flush()
+            vm_stdout_file.seek(0)
+            vm_stdout = vm_stdout_file.read().decode(errors='surrogateescape')
+
+            vm_stderr_file.flush()
+            vm_stderr_file.seek(0)
+            vm_stderr = vm_stderr_file.read().decode(errors='surrogateescape')
+
+        stdout = gdb_stdout + vm_stdout
+        stderr = gdb_stderr + vm_stderr
+
+        if gdb_returncode != 0:
+            raise subprocess.CalledProcessError(
+                gdb_returncode, ['gdb', '-q', '-x', gdb_script], encode_output(stdout),
+                encode_output(stderr))
+
+        guest_returncode = extract_vm_exit_code(vm_stdout, vm_stderr)
+        host_returncode = vm_proc.returncode
+        returncode = host_returncode if guest_returncode is None else guest_returncode
+        if returncode != 0:
+            raise subprocess.CalledProcessError(
+                returncode, args, encode_output(stdout), encode_output(stderr))
+        return stdout, stderr
 
     def run_binary(self, args, *, timeout=None, prefix=None, **kwds):
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
