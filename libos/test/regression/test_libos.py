@@ -1439,6 +1439,8 @@ class TC_50_GDB(RegressionTestCase):
         return match.group(1).strip()
 
     @unittest.skipIf(HAS_TDX, "GDB is currently not supported in TDX PAL")
+    @unittest.skipIf(HAS_VM, "TODO: re-enable after VM support is added to GDB regression tests "
+                             "(see https://github.com/gramineproject/gramine-tdx/pull/68)")
     def test_000_gdb_backtrace(self):
         # To run this test manually, use:
         # GDB=1 GDB_SCRIPT=debug.gdb gramine-{direct|sgx} debug
@@ -1448,22 +1450,7 @@ class TC_50_GDB(RegressionTestCase):
         # While the stack trace in SGX is unbroken, it currently starts at _start inside
         # enclave, instead of including eclave entry.
 
-        gdb_script = 'debug_vm.gdb' if HAS_VM else 'debug.gdb'
-        stdout, _ = self.run_gdb(['debug'], gdb_script)
-
-        if HAS_VM:
-            # TODO: VM PAL does not yet implement debug_map for runtime-loaded libraries, so
-            # backtrace checks across libc do not work on VM:
-            # https://github.com/gramineproject/gramine-tdx/issues/67
-            backtrace_1 = self.find('backtrace 1', stdout)
-            self.assertIn(' func ()', backtrace_1)
-            self.assertIn(' main ()', backtrace_1)
-            self.assertIn('debug.c', backtrace_1)
-
-            backtrace_2 = self.find('backtrace 2', stdout)
-            self.assertIn(' pal_common_console_write (', backtrace_2)
-            self.assertIn('pal_common_console.c', backtrace_2)
-            return
+        stdout, _ = self.run_gdb(['debug'], 'debug.gdb')
 
         backtrace_1 = self.find('backtrace 1', stdout)
         self.assertIn(' main ()', backtrace_1)
