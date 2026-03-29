@@ -5,6 +5,7 @@ import pathlib
 import re
 import resource
 import select
+import shlex
 import signal
 import socket
 import subprocess
@@ -210,7 +211,7 @@ def cleanup_vm(gramine_vm_id):
             pass
 
 def sq(s: str) -> str:
-    return "'" + s + "'"
+    return shlex.quote(s)
 
 def encode_output(data):
     return data.encode(errors='surrogateescape')
