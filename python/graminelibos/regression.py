@@ -295,7 +295,7 @@ class RegressionTestCase(unittest.TestCase):
 
     def build_vm_command(self, args, *, prefix=None, run_gdb=False, env=None, gdb_port=9000):
         application, rest = args[0], list(args[1:])
-        launch_env = os.environ if env is None else env
+        guest_env = os.environ if env is None else env
 
         qemu_gdb = (f'-gdb tcp::{gdb_port} -S' if run_gdb else '')
 
@@ -319,7 +319,7 @@ class RegressionTestCase(unittest.TestCase):
                 except Exception:
                     continue
             else:
-                return (launch_env.get('GRAMINE_RAM_SIZE') or '8G')
+                return (os.environ.get('GRAMINE_RAM_SIZE') or '8G')
 
             unit = 1
             if size_str.endswith('G'):
@@ -333,11 +333,11 @@ class RegressionTestCase(unittest.TestCase):
                 size = int(re.search(r'\d+', size_str).group())
                 return size_str if unit * size > 1024 * 1024 * 1024 else '1G'
             except Exception:
-                return (launch_env.get('GRAMINE_RAM_SIZE') or '8G')
+                return (os.environ.get('GRAMINE_RAM_SIZE') or '8G')
 
         mem_size = pick_mem()
-        cpu_num = (launch_env.get('QEMU_CPU_NUM')
-                   or launch_env.get('GRAMINE_CPU_NUM')
+        cpu_num = (os.environ.get('QEMU_CPU_NUM')
+                   or os.environ.get('GRAMINE_CPU_NUM')
                    or '1')
 
         qemu = 'qemu'
@@ -423,7 +423,7 @@ class RegressionTestCase(unittest.TestCase):
 
         gramine_envs = (
             '-gramine-envs '
-            f"{' '.join(serialize_item(f'{k}={v}') for k, v in launch_env.items())} "
+            f"{' '.join(serialize_item(f'{k}={v}') for k, v in guest_env.items())} "
             '-gramine-envs-end'
         )
 
@@ -480,11 +480,16 @@ class RegressionTestCase(unittest.TestCase):
     def run_vm(self, args, *, timeout=None, prefix=None, **kwds):
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
                    else self.DEFAULT_TIMEOUT)
-        env = kwds.get('env')
-        cmd, gramine_vm_id = self.build_vm_command(args, prefix=prefix, env=env)
+        guest_env = kwds.get('env')
+        cmd, gramine_vm_id = self.build_vm_command(args, prefix=prefix, env=guest_env)
+        host_kwds = dict(kwds)
+        # VM guest env is already injected by build_vm_command(); don't pass it to run_command(),
+        # or it would replace the host launcher environment and drop required vars such as PATH
+        # for host-side services like virtiofsd.
+        host_kwds.pop('env', None)
         try:
             host_returncode, stdout, raw_stderr = run_command(
-                cmd, timeout=timeout, can_fail=True, **kwds)
+                cmd, timeout=timeout, can_fail=True, **host_kwds)
         finally:
             cleanup_vm(gramine_vm_id)
 
