@@ -1260,7 +1260,7 @@ class TC_40_FileSystem(RegressionTestCase):
             for line in cpuinfo.split('\n'))
         if 'flags' in cpuinfo:
             cpuinfo['flags'] = ' '.join(flag for flag in cpuinfo['flags'].split()
-                if flag in CPUINFO_TEST_FLAGS)
+                if flag in CPUINFO_TEST_FLAGS and not (HAS_TDX and flag == 'sgx_lc'))
         else:
             cpuinfo['flags'] = ''
 
