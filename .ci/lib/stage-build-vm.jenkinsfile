@@ -10,7 +10,7 @@ stage('build-vm-dependencies') {
         git clone https://gitlab.com/virtio-fs/virtiofsd.git
         cd virtiofsd
         cargo build --release
-        install -D -m 0755 -s target/release/virtiofsd /usr/local/bin/virtiofsd
+        install -D -m 0755 -s target/release/virtiofsd "$PREFIX/bin/virtiofsd"
         cd ..
 
         # Install latest socat (v1.8.0.3 here, at least v1.7.4)
