@@ -255,8 +255,9 @@ class RegressionTestCase(unittest.TestCase):
         # VM/TDX path (QEMU)
         running_vm = HAS_VM or HAS_TDX
         if running_vm:
-            prog = 'gramine-tdx' if HAS_TDX else 'gramine-vm'
-            cmd = [*prefix, prog, *args]
+            prog = pathlib.Path(graminelibos._CONFIG_BINDIR) / (
+                'gramine-tdx' if HAS_TDX else 'gramine-vm')
+            cmd = [*prefix, fspath(prog), *args]
         else:
             if not self.loader_path.exists():
                 self.fail('loader ({}) not found'.format(self.loader_path))

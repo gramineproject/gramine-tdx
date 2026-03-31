@@ -2,6 +2,7 @@ conf = configuration_data()
 conf.set('VERSION', meson.project_version())
 conf.set('PKGLIBDIR', get_option('prefix') / pkglibdir)
 conf.set('LIBDIR', get_option('prefix') / get_option('libdir'))
+conf.set('BINDIR', get_option('prefix') / get_option('bindir'))
 conf.set('SYSLIBDIR', syslibdir)
 conf.set('SGX_ENABLED', sgx ? '1' : '0')
 
