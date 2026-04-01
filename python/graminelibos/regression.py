@@ -2,9 +2,11 @@ import contextlib
 import logging
 import os
 import pathlib
+import re
 import resource
 import select
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -19,6 +21,8 @@ fspath = getattr(os, 'fspath', str) # pylint: disable=invalid-name
 HAS_AVX = os.environ.get('AVX') == '1'
 HAS_EDMM = os.environ.get('EDMM') == '1'
 HAS_SGX = os.environ.get('SGX') == '1'
+HAS_TDX = os.environ.get('TDX') == '1'
+HAS_VM  = os.environ.get('VM')  == '1'
 IS_VM = os.environ.get('IS_VM') == '1'
 ON_X86 = os.uname().machine in ['x86_64']
 USES_MUSL = os.environ.get('GRAMINE_MUSL') == '1'
@@ -163,9 +167,25 @@ def run_command(cmd, *, timeout, open_fds_limit=None, can_fail=False, **kwds):
 
         return main_returncode, stdout, stderr
 
+def encode_output(data):
+    return data.encode(errors='surrogateescape')
+
+def extract_vm_exit_code(output):
+    match = re.search(r'\[\s*VM exited with code (\d+)\s*\]', output)
+    if match is not None:
+        return int(match.group(1))
+    return None
 
 class RegressionTestCase(unittest.TestCase):
-    DEFAULT_TIMEOUT = (20 if HAS_SGX else 10)
+    # TDX takes extra long time
+    if HAS_TDX:
+        DEFAULT_TIMEOUT = 150
+    elif HAS_VM:
+        DEFAULT_TIMEOUT = 120
+    elif HAS_SGX:
+        DEFAULT_TIMEOUT = 20
+    else:
+        DEFAULT_TIMEOUT = 10
 
     def get_env(self, name):
         try:
@@ -176,7 +196,16 @@ class RegressionTestCase(unittest.TestCase):
     @property
     def pal_path(self):
         # pylint: disable=protected-access
-        return pathlib.Path(graminelibos._CONFIG_PKGLIBDIR) / ('sgx' if HAS_SGX else 'direct')
+        base = pathlib.Path(graminelibos._CONFIG_PKGLIBDIR)
+        if HAS_TDX:
+            sub = 'tdx'
+        elif HAS_VM:
+            sub = 'vm'
+        elif HAS_SGX:
+            sub = 'sgx'
+        else:
+            sub = 'direct'
+        return base / sub
 
     @property
     def libpal_path(self):
@@ -186,8 +215,17 @@ class RegressionTestCase(unittest.TestCase):
     def loader_path(self):
         return self.pal_path / 'loader'
 
+    @property
+    def libpal_vm_path(self):
+        return (self.pal_path / 'tdshim-pal') if HAS_TDX else (self.pal_path / 'pal')
+
+    @property
+    def bios_path(self):
+        return self.pal_path / 'bios'
+
     def has_debug(self):
-        p = subprocess.run(['objdump', '-x', fspath(self.libpal_path)],
+        path = self.libpal_vm_path if (HAS_VM or HAS_TDX) else self.libpal_path
+        p = subprocess.run(['objdump', '-x', fspath(path)],
             check=True, stdout=subprocess.PIPE)
         dump = p.stdout.decode()
         return '.debug_info' in dump
@@ -210,18 +248,46 @@ class RegressionTestCase(unittest.TestCase):
 
     def run_binary(self, args, *, timeout=None, prefix=None, **kwds):
         timeout = (max(self.DEFAULT_TIMEOUT, timeout) if timeout is not None
-            else self.DEFAULT_TIMEOUT)
-
-        if not self.loader_path.exists():
-            self.fail('loader ({}) not found'.format(self.loader_path))
-        if not self.libpal_path.exists():
-            self.fail('libpal ({}) not found'.format(self.libpal_path))
-
+                   else self.DEFAULT_TIMEOUT)
         if prefix is None:
             prefix = []
 
-        cmd = [*prefix, fspath(self.loader_path), fspath(self.libpal_path), 'init', *args]
-        _returncode, stdout, stderr = run_command(cmd, timeout=timeout, **kwds)
+        # VM/TDX path (QEMU)
+        running_vm = HAS_VM or HAS_TDX
+        if running_vm:
+            guest_env = kwds.get('env')
+            if guest_env is not None:
+                launcher_env = dict(guest_env)
+                # `env=` replaces the whole launcher environment. Re-inject the minimum host-side
+                # search paths that `gramine-{vm,tdx}` needs for Python imports and host-side 
+                # services (e.g. virtiofsd) lookup.
+                for name in ('PATH', 'PYTHONPATH'):
+                    value = os.environ.get(name)
+                    if value is not None and name not in launcher_env:
+                        launcher_env[name] = value
+                kwds = dict(kwds)
+                kwds['env'] = launcher_env
+            prog = 'gramine-tdx' if HAS_TDX else 'gramine-vm'
+            cmd = [*prefix, prog, *args]
+        else:
+            if not self.loader_path.exists():
+                self.fail('loader ({}) not found'.format(self.loader_path))
+            if not self.libpal_path.exists():
+                self.fail('libpal ({}) not found'.format(self.libpal_path))
+
+            cmd = [*prefix, fspath(self.loader_path), fspath(self.libpal_path), 'init', *args]
+
+        host_returncode, stdout, stderr = run_command(
+            cmd, timeout=timeout, can_fail=running_vm, **kwds)
+        if running_vm:
+            # VM/TDX guest stdout/stderr are multiplexed onto QEMU stdout.
+            stderr = stdout + stderr
+
+            guest_returncode = extract_vm_exit_code(stdout)
+            returncode = host_returncode if guest_returncode is None else guest_returncode
+            if returncode != 0:
+                raise subprocess.CalledProcessError(
+                    returncode, args, encode_output(stdout), encode_output(stderr))
         return stdout, stderr
 
     @classmethod
