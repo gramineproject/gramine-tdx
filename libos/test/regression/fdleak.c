@@ -25,6 +25,7 @@ static void test_open_close(const char* fname) {
     }
 }
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
 static void test_open_fork(const char* fname) {
     int fds[INITIAL_OPEN_FDS];
     for (size_t i = 0; i < ARRAY_LEN(fds); i++) {
@@ -66,6 +67,7 @@ static void test_open_fork(const char* fname) {
         CHECK(close(fds[i]));
     }
 }
+#endif
 
 int main(int argc, char** argv) {
     if (argc != 1) {
@@ -74,7 +76,9 @@ int main(int argc, char** argv) {
 
     test_open_close(argv[0]);
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     test_open_fork(argv[0]);
+#endif
 
     puts("TEST OK");
     return 0;

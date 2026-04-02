@@ -266,6 +266,12 @@ foreach conf: configurations
             '-Wno-unused-parameter',
         ]
 
+        # Skip some regression test steps that require process creation, as VM/TDX PALs
+        # do not support it yet.
+        if vm or tdx
+            c_args += '-DVM_TDX_PROCESS_CREATION_UNSUPPORTED'
+        endif
+
         link_args = [
             '-pthread',
         ]
