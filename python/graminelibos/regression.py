@@ -281,7 +281,10 @@ class RegressionTestCase(unittest.TestCase):
             guest_returncode = extract_vm_exit_code(stdout)
             if guest_returncode is None:
                 if host_returncode == 0:
-                    raise AssertionError(f'VM/TDX command {cmd} exited without a guest exit code')
+                    exc = AssertionError(f'VM/TDX command {cmd} exited without a guest exit code')
+                    exc.stdout = stdout
+                    exc.stderr = stderr
+                    raise exc
                 returncode = host_returncode
             else:
                 returncode = guest_returncode

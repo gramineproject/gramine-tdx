@@ -410,8 +410,16 @@ class TC_01_Bootstrap(RegressionTestCase):
             self.run_binary(['abort_multithread'])
 
     def test_404_sigterm_multithread(self):
-        stdout, _ = self.run_binary(['sigterm_multithread'], prefix=['./test_sigterm.sh'])
-        self.assertIn('SHELL OK', stdout)
+        try:
+            stdout, _ = self.run_binary(['sigterm_multithread'], prefix=['./test_sigterm.sh'])
+            self.assertIn('SHELL OK', stdout)
+        except AssertionError as e:
+            if not (HAS_TDX or HAS_VM):
+                raise
+            # `test_sigterm.sh` terminates the VM/TDX launcher before the guest reports an exit
+            # code, so `run_binary()` raises even though the wrapper script itself succeeds.
+            self.assertIn('exited without a guest exit code', str(e))
+            self.assertIn('SHELL OK', e.stdout)
 
     def test_405_sigprocmask_pending(self):
         stdout, _ = self.run_binary(['sigprocmask_pending'], timeout=60)
