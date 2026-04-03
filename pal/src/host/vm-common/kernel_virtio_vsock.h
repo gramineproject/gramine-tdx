@@ -122,9 +122,11 @@ struct virtio_vsock_connection {
     enum virtio_vsock_state state;
     int state_futex;
 
-    UT_hash_handle hh_host_port;
-    uint64_t host_port;
-    uint64_t guest_port;
+    UT_hash_handle hh_port_pair;
+    struct {
+        uint64_t host_port;
+        uint64_t guest_port;
+    } port_pair;
 
     /* allocated and used only in LISTENING state */
     uint32_t* pending_conn_fds;
