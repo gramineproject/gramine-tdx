@@ -4,7 +4,7 @@ c_vdso_args = [
     '-ffreestanding',
 ]
 
-if vm
+if vm or tdx
     c_vdso_args += ['-DVDSO_USE_SYSCALL_INSTR']
 endif
 
