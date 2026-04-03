@@ -32,9 +32,6 @@ class TC_00_Unittests(RegressionTestCase):
         stdout, _ = self.run_binary(['spinlock'], timeout=20)
         self.assertIn('Test successful!', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM,
-        "TODO: re-enable after gramine_call() uses the syscall instruction path in VM/TDX builds "
-        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_001_rwlock(self):
         # You may need to adjust sgx.max_threads in the manifest when changing these
         instances = 5
@@ -46,9 +43,6 @@ class TC_00_Unittests(RegressionTestCase):
                                      str(writers_num), str(writers_delay_us)], timeout=45)
         self.assertIn('TEST OK', stdout)
 
-    @unittest.skipIf(HAS_TDX or HAS_VM,
-        "TODO: re-enable after gramine_call() uses the syscall instruction path in VM/TDX builds "
-        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_010_gramine_run_test(self):
         stdout, _ = self.run_binary(['run_test', 'pass'])
         self.assertIn('gramine_run_test("pass") = 0', stdout)
