@@ -280,6 +280,11 @@ int64_t pal_common_pipe_write(struct pal_handle* handle, uint64_t offset, uint64
 
     spinlock_lock(&pipe_buf->lock);
 
+    if (!pipe_buf->readable) {
+        bytes = -PAL_ERROR_CONNFAILED_PIPE;
+        goto out;
+    }
+
     /* must guarantee that PIPE_BUF_SIZE bytes are written atomically (for a blocking pipe) */
     bytes = 0;
     while (bytes < (ssize_t)len) {
