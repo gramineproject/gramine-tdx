@@ -847,9 +847,6 @@ class TC_30_Syscall(RegressionTestCase):
         # Futex Wake Test
         self.assertIn('Woke all kiddos', stdout)
 
-    @unittest.skipIf(HAS_TDX,
-        "TODO: re-enable after TDX builds include the vDSO "
-        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_041_futex_timeout(self):
         stdout, _ = self.run_binary(['futex_timeout'])
 
@@ -1085,9 +1082,6 @@ class TC_30_Syscall(RegressionTestCase):
         stdout, _ = self.run_binary(['pthread_set_get_affinity', '1000'])
         self.assertIn('TEST OK', stdout)
 
-    @unittest.skipIf(HAS_TDX,
-        "TODO: re-enable after TDX builds include the vDSO "
-        "(see https://github.com/gramineproject/gramine-tdx/pull/61)")
     def test_103_gettimeofday(self):
         stdout, _ = self.run_binary(['gettimeofday'])
         self.assertIn('TEST OK', stdout)
