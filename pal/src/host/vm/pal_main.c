@@ -193,8 +193,6 @@ noreturn void pal_start_c(void) {
         INIT_FAIL("Failed to initialize preloaded ranges");
 
     /* PAL binary is located at 1MB and may occupy until 4MB, see pal.lds */
-    /* FIXME: whole PAL binary is RWX because memory_pagetables_init() marked everything as RWX and
-     *        zero_out_memory_and_prot_none() did *not* modify perms for PAL binary memory pages */
     ret = add_preloaded_range(0x100000UL, 0x300000UL, "pal_binary");
     if (ret < 0)
         INIT_FAIL("Failed to preload PAL-binary memory range");
