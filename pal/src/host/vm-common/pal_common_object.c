@@ -112,7 +112,7 @@ static int check_socket_handle(struct pal_handle* handle, pal_wait_flags_t event
     if ((events & PAL_WAIT_READ) && peeked)
         revents |= PAL_WAIT_READ;
 
-    if ((events & PAL_WAIT_WRITE) && virtio_vsock_can_write())
+    if ((events & PAL_WAIT_WRITE) && virtio_vsock_can_write(handle->sock.fd))
         revents |= PAL_WAIT_WRITE;
 
     *out_events = revents;

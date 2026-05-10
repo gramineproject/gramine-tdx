@@ -362,6 +362,7 @@ int virtio_vsock_connect(int sockfd, const void* addr, size_t addrlen, uint64_t 
 int virtio_vsock_shutdown(int sockfd, enum virtio_vsock_shutdown shutdown);
 int virtio_vsock_close(int sockfd, uint64_t timeout_us);
 long virtio_vsock_peek(int sockfd);
+bool virtio_vsock_can_write(int sockfd);
 long virtio_vsock_read(int sockfd, void* buf, size_t count);
 long virtio_vsock_write(int sockfd, const void* buf, size_t count);
 int virtio_vsock_getsockname(int sockfd, const void* addr, size_t* addrlen);
@@ -369,7 +370,6 @@ int virtio_vsock_set_socket_options(int sockfd, bool ipv6_v6only, bool reuseport
 
 int virtio_vsock_isr(void);
 int virtio_vsock_bottomhalf(void);
-bool virtio_vsock_can_write(void);
 int virtio_vsock_init(struct virtio_pci_regs* pci_regs, struct virtio_vsock_config* pci_config,
                       uint64_t notify_off_addr, uint32_t notify_off_multiplier,
                       uint32_t* interrupt_status_reg);
