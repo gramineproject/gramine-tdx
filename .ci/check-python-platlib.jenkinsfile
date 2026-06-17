@@ -8,8 +8,9 @@ node() {
         'almalinux9',
         'almalinux8',
     ].each { distro ->
+        echo "TAG is local:${env.BUILD_TAG}-${distro}"
         docker.build(
-            "local:${env.BUILD_TAG}", "-f .ci/check-python-platlib-${distro}.dockerfile ."
+            "local:${env.BUILD_TAG}-${distro}", "-f .ci/check-python-platlib-${distro}.dockerfile ."
         ).inside() {
             sh '''
                 python3 -c "import sys; sys.exit('$(python3 ./scripts/get-python-platlib.py /usr/local)' not in sys.path)"
