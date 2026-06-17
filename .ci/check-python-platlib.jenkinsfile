@@ -8,6 +8,7 @@ node() {
         'almalinux9',
         'almalinux8',
     ].each { distro ->
+        echo "TAG is local:${env.BUILD_TAG}-${distro}"
         docker.build(
             "local:${env.BUILD_TAG}-${distro}", "-f .ci/check-python-platlib-${distro}.dockerfile ."
         ).inside() {
