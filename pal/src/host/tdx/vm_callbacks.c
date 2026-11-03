@@ -431,8 +431,17 @@ int vm_virtualization_exception(struct isr_regs* regs) {
                 regs->rdx = 1U << 8; /* invariant TSC available */
                 regs->rip += vmexit_instr_length;
                 return 0;
+            } else if (regs->rax == 0x0000000d && regs->rcx == 0x00000013) {
+                /* X86_XSTATE_APX_F_ID */
+                /* This subleaf is not handled by TD Module. */
+                regs->rax = 0;
+                regs->rbx = 0;
+                regs->rcx = 0;
+                regs->rdx = 0;
+                regs->rip += vmexit_instr_length;
+                return 0;
             }
-            return -PAL_ERROR_DENIED;
+            return PAL_ERROR_DENIED;
 
         default: /* unsupported exit reason */
             return -PAL_ERROR_DENIED;
