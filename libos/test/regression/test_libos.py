@@ -542,8 +542,8 @@ class TC_03_FileCheckPolicy(RegressionTestCase):
         stdout, stderr = self.run_binary(['file_check_policy_strict', 'read', 'trusted_testfile'])
         self.assertIn('file_check_policy succeeded', stdout)
 
-        # verify that Gramine-SGX does not print a warning on file_check_policy = "strict"
-        if HAS_SGX:
+        # verify that Gramine-SGX/TDX does not print a warning on file_check_policy = "strict"
+        if HAS_SGX or HAS_TDX:
             self.assertIn('Gramine detected the following insecure configurations', stderr)
             self.assertNotIn('- sgx.file_check_policy = ', stderr)
 
@@ -587,8 +587,8 @@ class TC_03_FileCheckPolicy(RegressionTestCase):
                       'file_check_policy', stderr)
         self.assertIn('file_check_policy succeeded', stdout)
 
-        # verify that Gramine-SGX prints a warning on file_check_policy = "allow_all_bug_log"
-        if HAS_SGX:
+        # verify that Gramine-SGX/TDX prints a warning on file_check_policy = "allow_all_bug_log"
+        if HAS_SGX or HAS_TDX:
             self.assertIn('Gramine detected the following insecure configurations', stderr)
             self.assertIn('- sgx.file_check_policy = allow_all_but_log', stderr)
 
