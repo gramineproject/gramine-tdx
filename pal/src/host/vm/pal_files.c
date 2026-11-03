@@ -11,7 +11,6 @@ struct handle_ops g_file_ops = {
     .write          = &pal_common_file_write,
     .destroy        = &pal_common_file_destroy,
     .delete         = &pal_common_file_delete,
-    .map            = &pal_common_file_map,
     .setlength      = &pal_common_file_setlength,
     .flush          = &pal_common_file_flush,
     .attrquery      = &pal_common_file_attrquery,

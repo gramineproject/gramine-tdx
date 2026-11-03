@@ -9,7 +9,6 @@
 #include "api.h"
 #include "pal.h"
 #include "pal_common.h"
-#include "pal_common_tf.h"
 #include "pal_error.h"
 #include "pal_flags_conv.h"
 #include "pal_internal.h"
@@ -24,8 +23,6 @@
 
 #define DIRBUF_SIZE 1024
 #define DT_DIR      4
-
-bool g_use_trusted_files = false; /* only TDX PAL will set this */
 
 /* out_modified_path is allocated by this func; must be freed by the caller */
 static int extract_dir_and_base(const char* orig_path, char** out_modified_path, char** out_dir,
@@ -220,47 +217,6 @@ int pal_common_file_open(struct pal_handle** handle, const char* type, const cha
     hdl->file.fh       = fh;
     hdl->file.realpath = norm_path;
 
-    struct trusted_file* tf = NULL;
-    if (g_use_trusted_files && !(options & PAL_OPTION_PASSTHROUGH)) {
-        tf = get_trusted_or_allowed_file(hdl->file.realpath);
-        if (!tf) {
-            if (get_file_check_policy() != FILE_CHECK_POLICY_ALLOW_ALL_BUT_LOG) {
-                log_warning("Disallowing access to file '%s'; file is not trusted or allowed.",
-                            hdl->file.realpath);
-                ret = -PAL_ERROR_DENIED;
-                goto out;
-            }
-            log_warning("Allowing access to unknown file '%s' due to file_check_policy settings.",
-                        hdl->file.realpath);
-        }
-    }
-
-    if (tf && !tf->allowed && (!file_exists
-                || (access == PAL_ACCESS_RDWR)
-                || (access == PAL_ACCESS_WRONLY))) {
-        log_error("Disallowing create/write/append to a trusted file '%s'", hdl->file.realpath);
-        ret = -PAL_ERROR_DENIED;
-        goto out;
-    }
-
-    if (tf) {
-        /* now we can learn the size of the trusted file */
-        struct fuse_attr attr;
-        ret = virtio_fs_fuse_getattr(hdl->file.nodeid, hdl->file.fh, FUSE_GETATTR_FH, UINT64_MAX,
-                                     &attr);
-        if (ret < 0)
-            goto out;
-        tf->size = attr.size;
-
-        void* chunk_hashes = NULL;
-        ret = load_trusted_or_allowed_file(tf, hdl, !file_exists, &chunk_hashes);
-        if (ret < 0)
-            goto out;
-
-        hdl->file.chunk_hashes = chunk_hashes;
-        hdl->file.size = tf->size;
-    }
-
     *handle = hdl;
     ret = 0;
 out:
@@ -283,58 +239,32 @@ int64_t pal_common_file_read(struct pal_handle* handle, uint64_t offset, uint64_
                              void* buffer) {
     int ret;
 
-    if (!handle->file.chunk_hashes) {
-        /* case of passthrough/allowed file */
-
-        /* try to read the whole buffer (this is important for some workloads like Java); do it in
-         * FILE_CHUNK_SIZE chunks because virtio-fs cannot consume more than this limit at a time */
-        uint64_t total_read_size = 0;
-        while (total_read_size < count) {
-            uint64_t read_size;
-            ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh,
-                                      MIN(count - total_read_size, FILE_CHUNK_SIZE),
-                                      offset + total_read_size, buffer + total_read_size,
-                                      &read_size);
-            if (ret < 0) {
-                if (ret == -PAL_ERROR_INTERRUPTED)
-                    continue;
-                return total_read_size ? (int64_t)total_read_size : ret;
-            }
-
-            if (read_size == 0)
-                break;
-
-            total_read_size += read_size;
+    /* try to read the whole buffer (this is important for some workloads like Java); do it in
+    * FILE_CHUNK_SIZE chunks because virtio-fs cannot consume more than this limit at a time */
+    uint64_t total_read_size = 0;
+    while (total_read_size < count) {
+        uint64_t read_size;
+        ret = virtio_fs_fuse_read(handle->file.nodeid, handle->file.fh,
+                                    MIN(count - total_read_size, FILE_CHUNK_SIZE),
+                                    offset + total_read_size, buffer + total_read_size,
+                                    &read_size);
+        if (ret < 0) {
+            if (ret == PAL_ERROR_INTERRUPTED)
+                continue;
+            return total_read_size ? (int64_t)total_read_size : ret;
         }
 
-        return (int64_t)total_read_size;
+        if (read_size == 0)
+            break;
+
+        total_read_size += read_size;
     }
 
-    /* case of trusted file */
-    uint64_t file_size = handle->file.size;
-    if (offset >= file_size)
-        return 0;
-
-    int64_t end = MIN(offset + count, file_size);
-    int64_t aligned_offset = ALIGN_DOWN(offset, TRUSTED_CHUNK_SIZE);
-    int64_t aligned_end    = ALIGN_UP(end, TRUSTED_CHUNK_SIZE);
-
-    ret = copy_and_verify_trusted_file(handle, buffer, aligned_offset, aligned_end, offset, end,
-                                       handle->file.chunk_hashes, file_size);
-    if (ret < 0)
-        return ret;
-
-    return end - offset;
+    return (int64_t)total_read_size;
 }
 
 int64_t pal_common_file_write(struct pal_handle* handle, uint64_t offset, uint64_t count,
                               const void* buffer) {
-    if (handle->file.chunk_hashes) {
-        /* case of trusted file: disallow writing completely */
-        log_warning("Writing to a trusted file (%s) is disallowed!", handle->file.realpath);
-        return -PAL_ERROR_DENIED;
-    }
-
     /* try to write the whole buffer (this is important for some workloads like Python3); do it in
      * FILE_CHUNK_SIZE chunks because virtio-fs cannot consume more than this limit at a time */
     uint64_t total_written_size = 0;
@@ -367,76 +297,6 @@ void pal_common_file_destroy(struct pal_handle* handle) {
 
     free(handle->file.realpath);
     free(handle);
-}
-
-int pal_common_file_map(struct pal_handle* handle, void* addr, pal_prot_flags_t prot,
-                        uint64_t offset, uint64_t size) {
-    int ret;
-
-    assert(IS_ALLOC_ALIGNED(offset) && IS_ALLOC_ALIGNED(size));
-
-    if (!(prot & PAL_PROT_WRITECOPY) && (prot & PAL_PROT_WRITE)) {
-        log_warning("App tries to create a writable shared file mapping. This is impossible.");
-        return -PAL_ERROR_DENIED;
-    }
-
-    /* note that we need to first mmap with write permission (to update the mem region with file
-     * contents), and then we mprotect back to read-only (if was requested) */
-    bool read  = !!(prot & PAL_PROT_READ);
-    bool write = !!(prot & (PAL_PROT_WRITE | PAL_PROT_WRITECOPY));
-    bool execute = !!(prot & PAL_PROT_EXEC);
-    ret = memory_alloc(addr, size, read, /*write=*/true, execute);
-    if (ret < 0)
-        return ret;
-
-    if (!handle->file.chunk_hashes) {
-        /* case of allowed file */
-        ret = emulate_file_map_via_read(handle->file.nodeid, handle->file.fh, addr, offset, size);
-        goto out;
-    }
-
-    /* case of trusted file */
-    int64_t end = MIN(offset + size, handle->file.size);
-    size_t bytes_filled;
-
-    if ((int64_t)offset >= end) {
-        /* file is mmapped at offset beyond file size, there are no trusted-file contents to back
-         * mmapped enclave pages; this is a legit case, so simply zero out these enclave pages and
-         * return success */
-        bytes_filled = 0;
-    } else {
-        int64_t aligned_offset = ALIGN_DOWN(offset, TRUSTED_CHUNK_SIZE);
-        int64_t aligned_end    = ALIGN_UP(end, TRUSTED_CHUNK_SIZE);
-
-        ret = copy_and_verify_trusted_file(handle, addr, aligned_offset, aligned_end, offset, end,
-                                           handle->file.chunk_hashes, handle->file.size);
-        if (ret < 0) {
-            log_error("Verification of trusted file failed during mmap: %s", pal_strerror(ret));
-            goto out;
-        }
-
-        bytes_filled = end - offset;
-    }
-
-    if (size > bytes_filled) {
-        /* file ended before all mmapped memory was filled -- remaining memory must be zeroed */
-        memset((char*)addr + bytes_filled, 0, size - bytes_filled);
-    }
-
-    if (!write) {
-        /* restore read-only permission */
-        ret = memory_protect(addr, size, read, /*write=*/false, execute);
-        if (ret < 0) {
-            log_error("Cannot restore read-only permission during file mmap, fatal.");
-            BUG();
-        }
-    }
-
-    ret = 0;
-out:
-    if (ret < 0)
-        (void)memory_free(addr, size);
-    return ret;
 }
 
 int pal_common_file_setlength(struct pal_handle* handle, uint64_t length) {
