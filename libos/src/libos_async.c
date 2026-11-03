@@ -338,6 +338,8 @@ void terminate_async_worker(void) {
     set_pollable_event(&install_new_event);
 
     while (__atomic_load_n(&async_worker_running, __ATOMIC_ACQUIRE)) {
+        /* yield the execution so the async worker can run and exit when there is only one vCPU */
+        PalThreadYieldExecution();
         CPU_RELAX();
     }
 
