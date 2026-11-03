@@ -39,6 +39,8 @@ uint64_t g_tsc_mhz;
 
 static struct pal_handle* g_first_thread_handle = NULL;
 
+const size_t g_page_size = PRESET_PAGESIZE;
+
 #define FW_CFG_RAM_SIZE 0x03 /* 64-bit RAM size in bytes */
 #define FW_CFG_NB_CPUS  0x05 /* 32-bit number of vCPUs */
 
