@@ -40,6 +40,7 @@ int main(void) {
 
     fflush(stdout);
 
+#ifndef VM_TDX_PROCESS_CREATION_UNSUPPORTED
     int pid = CHECK(fork());
     if (pid == 0) {
         /* verify that NOFILE limit is correctly migrated to the child process */
@@ -53,6 +54,7 @@ int main(void) {
         if (!WIFEXITED(status) || WEXITSTATUS(status))
             errx(1, "child wait status: %#x", status);
     }
+#endif
 
     good_dup_fd = dup2(dev_null_fd, old_lim);
     CHECK(good_dup_fd);
