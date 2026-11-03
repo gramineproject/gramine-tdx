@@ -905,6 +905,8 @@ class TC_30_Syscall(RegressionTestCase):
         self.assertIn('CHILD OK', stdout)
         self.assertIn('TEST OK', stdout)
 
+    @unittest.skipIf(HAS_TDX or HAS_VM,
+                     "Multi-processing is currently not supported in VM/TDX PALs")
     def test_052_mmap_file_backed_trusted(self):
         stdout, _ = self.run_binary(['mmap_file_backed', 'mmap_file_backed'], timeout=60)
         self.assertIn('Child process done', stdout)
